@@ -1,0 +1,165 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+r0 = 0.5 #m
+A0 = np.pi * r0**2 #m^2
+rF = 0.1 #m
+AF = np.pi * rF**2 #m^2
+
+R = 296.8 #J/kgK
+L = 1 #m 
+numSteps = 1000
+dX = L/numSteps
+
+#Nozzle Area Calculation
+aConvNozzle = []    
+for n in range(numSteps + 1):
+    x = n * (L/numSteps)
+    rX = r0 - ( (r0 - rF)/L ) * x
+    A = np.pi * rX**2
+    aConvNozzle.append(A)
+
+sHC0 = 1.4
+T0 = 600 #kelvin
+v0 = 40 # m/s
+P0 = 101000 #inital pressure Pa
+rho0 = P0/(R*T0) #inital density
+M0 = v0/np.sqrt(sHC0 * R * T0)
+dHtdx = (200 * 10**3)/L # J/(kg * m)
+
+temp = []
+temp.append(T0)
+
+velocities = []
+velocities.append(v0)
+
+pressure = []
+pressure.append(P0)
+
+density = []
+density.append(rho0)
+
+machNum = []
+machNum.append(M0)
+
+shcAR = []
+shcAR.append(sHC0)
+
+
+def mNum(v,a):
+    M = v/a
+    return M
+
+def soS(sHC,T):
+    a = np.sqrt(sHC * R * T)
+    return a
+
+def Ht(Cp, T, rho):
+    ht = Cp * T * (1/(2*rho**2))
+    return ht
+
+def cp(T):
+    shcp = (0.02926640*10**2 + 0.14879768E-02 * T - 0.05684760E-05 * T**2 + 0.10097038E-09 * T**3 - 0.06753351E-13 * T**4) * R
+    return shcp
+
+def shc(cp):
+    SHC = cp / (cp - R)
+    return SHC
+
+def dVdA (v,A,M,Cp,T,dHtdA):
+    dvdA = 1/(1-M**2) * ((-v/A) + ((v/(Cp * T)) * dHtdA))
+    return dvdA
+
+def dHtdA (dA):
+    dhtda = dHtdx * ((dA/dX)**-1) 
+    return dhtda
+
+def dPdA (sHC, M, P, A, cp, T, dHtdA):
+    dpda = ((sHC * M**2)/(1-M**2)) * ((P/A) - ((P/(cp*T)) * dHtdA))
+    return dpda
+
+def delA (An1,An):
+    dA = An1 - An
+    return dA
+
+def vnP1(dVdA, delA, v):
+    vNP1 = v + (dVdA * delA)
+    return vNP1
+
+def pnP1(dPdA, delA, P):
+    pNP1 = P + (dPdA * delA)
+    return pNP1
+
+def rhonP1(rho,V1,A1,V2,A2):
+    denNP1 = (rho * V1 * A1)/(V2 * A2)
+    return denNP1
+
+for n in range(1, len(aConvNozzle)):
+    v = vnP1(
+        dVdA(
+            velocities[n-1], 
+            aConvNozzle[n-1],
+            mNum(
+                velocities[n-1],
+                soS(shc(cp(temp[n-1])),temp[n-1])),
+            cp(temp[n-1]),
+            temp[n-1],
+            dHtdA(
+                delA(aConvNozzle[n],aConvNozzle[n-1]))),
+            delA(
+                aConvNozzle[n],aConvNozzle[n-1]),
+            velocities[n-1]
+            )  
+    
+    p = pnP1(
+    dPdA(
+        shc(cp(temp[n-1])),                                
+        mNum(velocities[n-1], soS(shc(cp(temp[n-1])), temp[n-1])),  
+        pressure[n-1],                                    
+        aConvNozzle[n-1],                                 
+        cp(temp[n-1]),                                    
+        temp[n-1],                                         
+        dHtdA(delA(aConvNozzle[n],aConvNozzle[n-1])
+        )                                                
+    ),
+    delA(aConvNozzle[n], aConvNozzle[n-1]),
+    pressure[n-1]
+)
+    
+    
+    velocities.append(v)
+    rho = rhonP1(density[n-1], velocities[n-1], aConvNozzle[n-1], velocities[n], aConvNozzle[n])
+    pressure.append(p)         
+    density.append(rho)
+    temp.append(pressure[n]/(density[n] * R))
+    machNum.append(mNum(velocities[n],soS(shc(cp(temp[n])),temp[n])))
+
+    if machNum[-1] >= 1.0:
+        print(f"Flow choked at step {n-1}, Mach = {machNum[-1]:.3f}")
+        break
+
+
+   
+
+
+
+v_List = np.array(velocities)
+p_List = np.array(pressure)
+t_List = np.array(temp)
+m_List = np.array(machNum)
+A_List = np.array(aConvNozzle[:len(velocities)])
+
+plt.plot(A_List, v_List, "o-")
+plt.gca().invert_xaxis()      
+plt.title("V vs A")
+plt.xlabel("Cross Sectional Area (m^2)")
+plt.ylabel("Velocity (m/s)")
+plt.show()
+
+plt.plot(A_List, m_List, "o-")
+plt.gca().invert_xaxis()      
+plt.title("M vs A")
+plt.xlabel("Cross Sectional Area (m^2)")
+plt.ylabel("Mach Number")
+plt.show()

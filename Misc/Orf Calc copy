@@ -1,0 +1,50 @@
+import numpy as np
+from scipy.optimize import fsolve
+
+def size_orifice_subsonic(
+    mdot,           # kg/s
+    P0_psi,         # upstream pressure (psi)/stag pressure
+    P1_psi,         # downstream pressure (psi)
+    T0,             # stagnation temperature (K)
+    gamma=1.4,      
+    R=296.8,        # N2
+    Cd=0.6          #assuming just avg Cd or whatever
+):
+    psi_to_Pa = 6894.76
+
+    # Convert to psi to Pa
+    P0 = (P0_psi) * psi_to_Pa
+    P1 = (P1_psi) * psi_to_Pa
+
+    Pratio = P1 / P0
+
+    # 
+    def mach_eq(M):
+        return (1 + (gamma - 1)/2 * M**2)**(-gamma/(gamma - 1)) - Pratio
+
+    M2 = fsolve(mach_eq, 0.2)[0]
+
+
+    term = (1 + (gamma - 1)/2 * M2**2)**(-(gamma + 1)/(2*(gamma - 1)))
+    A = mdot / (
+        Cd * P0 * np.sqrt(gamma / (R * T0)) * M2 * term
+    )
+
+    D = np.sqrt(4 * A / np.pi)
+
+    return A, D, M2
+
+mdot = 0.05          # kg/s
+P0_psi = 750        # dome regulator output
+P2_psi = 650        # downstream/tank pressure (post orf)
+T0 = 50 + 273.15    # K 
+Cd = 0.6            # discharge coefficient
+
+A, D, M = size_orifice_subsonic(mdot, P0_psi, P2_psi, T0, Cd=Cd)
+
+print("Exit Mach number:", M)
+print("Orifice Area (m^2):", A)
+print("Orifice Diameter (m):", D)
+print("Orifice Diameter (in):", D * 39.37)
+print("Orifice Area (in):", A * 1550)
+

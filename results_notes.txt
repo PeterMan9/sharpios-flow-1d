@@ -1,0 +1,19 @@
+Issues:
+tiny pressure from newton raphson 
+    resolved: it was because the difference between total injector area and preburner area was massive 
+
+very weird spiking in entropy and stag pressure at around 0.375m under multiple conditions 
+    conditions testing:
+        M = 0.462, choked = true (0.42315m), spiking = true - occurs pre choking
+        M = 0.6,0.6,0.8,0.656, choked = true (0.0544), spiking = true - occurs pre choking 
+        M = 0.6,0.6,0.7,0.6309, choked = true (0.1655), spiking = true - occurs pre choking
+        M = 0.5,0.5,0.6,0.5316, choked = true (0.2978), spking = false - entropy and stag pressure changes look realistic 
+        M = 0.4,0.4,0.45,0.41649, choked = false, spking = true 
+    Observations:
+        in starting range of mach 0.5, the graphs look fine and it seems to be choking at a resonable length along the preburner. 
+        at an inlet mach of 0.4 to high 0.4s crazy drops in entropy and gains in stagnation pressure seem to be occuring - before the chocking
+        at above a mach of 0.6 the flow seems to choke almost instantly 
+
+
+Things to talk with Ral about at the meeting - ways to debug this because it is seemingly very strange
+Send him my power point slides 

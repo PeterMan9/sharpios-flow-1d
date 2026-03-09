@@ -1,0 +1,138 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+#initial variables/
+r0 = 0.5 #m
+A0 = np.pi * r0**2 #m^2
+rF = 0.1 #m
+AF = np.pi * rF**2 #m^2
+sHC = 1.4
+R = 287 #J/kgK
+theta = 20 # degrees
+L = 1 #m 
+numSteps = 1000
+dX = L/numSteps
+
+#Nozzle Area Calculation
+aConvNozzle = []    
+for n in range(numSteps + 1):
+    x = n * (L/numSteps)
+    rX = r0 - ( (r0 - rF)/L ) * x
+    A = np.pi * rX**2
+    aConvNozzle.append(A)
+
+T0 = 600 #kelvin
+temp = []
+temp.append(T0)
+
+v0 = 40 # m/s
+velocities = []
+velocities.append(v0)
+
+P0 = 101000 #inital pressure Pa
+pressure = []
+pressure.append(P0)
+
+rho0 = P0/(R*T0) #inital density
+density = []
+density.append(rho0)
+
+M0 = v0/np.sqrt(sHC * R * T0)
+machNum = []
+machNum.append(M0)
+
+def mNum(v,a):
+    M = v/a
+    return M
+
+def soS(T):
+    a = np.sqrt(sHC * R * T)
+    return a
+
+def dVdA (v,A,M):
+    dvdA = (-1 * v)/ (A * (1- M**2))
+    return dvdA
+
+def dAdX (Ai, Ai1, dX):
+    dAdx = (Ai1 - Ai)/dX
+    return dAdx
+
+def dPdA (P,A,M):
+    dpda = (sHC * (M)**2 * P)/((1-M**2) * A)
+    return dpda
+
+def delA (An1,An):
+    dA = An1 - An
+    return dA
+
+def vnP1(dVdA, delA, v):
+    vNP1 = v + (dVdA * delA)
+    return vNP1
+def pnP1(dPdA, delA, P):
+    pNP1 = P + (dPdA * delA)
+    return pNP1
+
+def rhonP1(rho,V1,A1,V2,A2):
+    denNP1 = (rho * V1 * A1)/(V2 * A2)
+    return denNP1
+
+for n in range(1, len(aConvNozzle)):
+    v = vnP1(
+        dVdA(velocities[n-1], 
+            aConvNozzle[n-1], 
+            mNum(velocities[n-1],soS(temp[n-1]))), 
+        delA(aConvNozzle[n], aConvNozzle[n-1]), 
+        velocities[n-1])
+    
+    p = pnP1(
+        dPdA(
+            pressure[n-1],
+            aConvNozzle[n-1],
+            mNum(velocities[n-1],soS(temp[n-1]))),    
+        delA(aConvNozzle[n], aConvNozzle[n-1]),
+        pressure[n-1])
+    
+    print(mNum(velocities[n-1],soS(temp[n-1])))
+
+    velocities.append(v)
+    rho = rhonP1(density[n-1], velocities[n-1], aConvNozzle[n-1], velocities[n], aConvNozzle[n])
+    pressure.append(p)         
+    density.append(rho)
+    temp.append(pressure[n]/(density[n] * R))
+    machNum.append(mNum(velocities[n],soS(temp[n])))
+    
+ 
+v_List = np.array(velocities)
+p_List = np.array(pressure)
+t_List = np.array(temp)
+m_list = np.array(machNum)
+
+'''
+plt.plot(aConvNozzle, v_List, "o-")
+plt.gca().invert_xaxis()      
+plt.title("V vs A")
+plt.xlabel("Cross Sectional Area (m^2)")
+plt.ylabel("Velocity (m/s)")
+plt.show()
+
+plt.plot(aConvNozzle, m_list, "o-")
+plt.gca().invert_xaxis()      
+plt.title("mach Number vs A")
+plt.xlabel("Cross Sectional Area (m^2)")
+plt.ylabel("Velocity (m/s)")
+plt.show()
+
+plt.plot(aConvNozzle, p_List, "o-")
+plt.gca().invert_xaxis()      
+plt.title("P vs A")
+plt.xlabel("Cross Sectional Area (m^2)")
+plt.ylabel("Pressure (Pa)")
+plt.show()
+
+plt.plot(aConvNozzle, t_List, "o-")
+plt.gca().invert_xaxis()      
+plt.title("Temp vs A")
+plt.xlabel("Cross Sectional Area (m^2)")
+plt.ylabel("Temp (kelvin)")
+plt.show()
+'''

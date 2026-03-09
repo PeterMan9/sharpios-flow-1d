@@ -1,0 +1,245 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy
+from scipy.optimize import fsolve
+
+
+#initial variables/
+r0 = 0.5 #m
+A0 = np.pi * r0**2 #m^2
+rF = 0.1 #m
+AF = np.pi * rF**2 #m^2
+gamma = 1.4
+R = 296.8 #J/kgK
+L = 0.5 #m 
+numSteps = 100000
+dX = L/numSteps
+eps = 1E-4
+#Nozzle Area Calculation
+Astar = AF
+
+aDiv= []    
+for n in range(numSteps + 1):
+    x = n * (L/numSteps)
+    rX = r0 + ( (r0 - rF)/L ) * x
+    A = np.pi * rX**2
+    aDiv.append(A)
+
+T0 = 300 #kelvin
+temp = []
+temp.append(T0)
+
+v0 = 500 # m/s
+velocities = []
+velocities.append(v0)
+
+P0 = 101000 #inital pressure Pa
+pressure = []
+pressure.append(P0)
+
+rho0 = P0/(R*T0) #inital density
+density = []
+density.append(rho0)
+
+M0 = v0/np.sqrt(gamma * R * T0)
+machNum = []
+machNum.append(M0)
+
+def mNum(v,a):
+    M = v/a
+    return M
+
+def soS(T):
+    a = np.sqrt(gamma * R * T)
+    return a
+
+def dVdA (v,A,M):
+    dvdA = (-1 * v)/ (A * (1- M**2))
+    return dvdA
+
+def dAdX (Ai, Ai1, dX):
+    dAdx = (Ai1 - Ai)/dX
+    return dAdx
+
+def dPdA (P,A,M):
+    dpda = (gamma * (M)**2 * P)/((1-M**2) * A)
+    return dpda
+
+def delA (An1,An):
+    dA = An1 - An
+    return dA
+
+def vnP1(dVdA, delA, v):
+    vNP1 = v + (dVdA * delA)
+    return vNP1
+def pnP1(dPdA, delA, P):
+    pNP1 = P + (dPdA * delA)
+    return pNP1
+
+
+def rk4_V(A, v, dA, M):
+    k1 = dVdA(v, A, M)
+
+    v2 = v + (dA*k1)/2
+    k2 = dVdA(v2, A + 0.5*dA, M)
+
+    v3 = v + (dA*k2)/2
+    k3 = dVdA(v3, A + 0.5*dA, M)
+
+    v4 = v + dA*k3
+    k4 = dVdA(v4, A + dA, M)
+
+    v_n = v + (dA/6.0)*(k1 + 2*k2 + 2*k3 + k4)
+
+    return v_n
+
+def rk4_P(A, P, dA, M):
+    k1 = dPdA(P, A, M)
+
+    P2 = P + (dA*k1)/2
+    k2 = dPdA(P2, A + 0.5*dA, M)
+
+    P3 = P + (dA*k2)/2
+    k3 = dPdA(P3, A + 0.5*dA, M)
+
+    P4 = P + dA*k3
+    k4 = dPdA(P4, A + dA, M)
+
+    P_n = P + (dA/6.0)*(k1 + 2*k2 + 2*k3 + k4)
+    return P_n
+    
+
+def rhonP1(rho,V1,A1,V2,A2):
+    denNP1 = (rho * V1 * A1)/(V2 * A2)
+    return denNP1
+
+for n in range(1, len(aDiv)):
+
+    if machNum[n-1] < 0.9 or machNum[n-1] > 1.1:
+        v = vnP1(
+            dVdA(velocities[n-1], 
+                aDiv[n-1], 
+                mNum(velocities[n-1],soS(temp[n-1]))), 
+            delA(aDiv[n], aDiv[n-1]), 
+            velocities[n-1])
+    
+        p = pnP1(
+            dPdA(
+                pressure[n-1],
+                aDiv[n-1],
+                mNum(velocities[n-1],soS(temp[n-1]))),    
+            delA(aDiv[n], aDiv[n-1]),
+            pressure[n-1])
+    else:
+        v = rk4_V(aDiv[n-1],
+                velocities[n-1],
+                aDiv[n] - aDiv[n-1],
+                mNum(velocities[n-1],soS(temp[n-1])))
+        
+        p = rk4_P(
+            aDiv[n-1],
+            pressure[n-1],
+            aDiv[n] - aDiv[n-1],
+            mNum(velocities[n-1],soS(temp[n-1]))
+        )
+        
+    velocities.append(v)
+    rho = rhonP1(density[n-1], velocities[n-1], aDiv[n-1], velocities[n], aDiv[n])
+    pressure.append(p)         
+    density.append(rho)
+    temp.append(pressure[n]/(density[n] * R))
+    machNum.append(mNum(velocities[n],soS(temp[n])))
+
+
+    if machNum[n] <= 1.0:
+        print(f"Flow choked at step {n-1}, Mach = {machNum[-1]:.3f}")
+        break
+
+v_List = np.array(velocities)
+p_List = np.array(pressure)
+t_List = np.array(temp)
+m_List = np.array(machNum)
+A_List = np.array(aDiv[:len(velocities)])
+
+
+#isentropic solving solving calcs
+mExact_list = [] 
+mExact_list.append(M0)
+
+pExact_List = []
+pExact_List.append(P0)
+
+TExact_List = []
+TExact_List.append(T0)
+
+rhoExact_List = []
+rhoExact_List.append(rho0)
+
+vExact_List = []
+vExact_List.append(v0)
+#isentropic relations 
+
+
+def mach_Aratio(M):
+    return (1/M) * ((1 + ((gamma - 1)/2) * M**2)/((gamma+1)/2)) ** ((gamma + 1)/(2 * (gamma - 1)))
+
+def fM (Mratio, Aratio):
+    return mach_Aratio(Mratio) - Aratio
+
+AratioInitial = (1/M0) * ((1 + ((gamma - 1)/2) * M0**2)/((gamma+1)/2)) ** ((gamma + 1)/(2 * (gamma - 1)))
+Astar = A0/AratioInitial
+
+pStag  = P0 * (1 + ((gamma - 1)/2) * M0**2)**(gamma/(gamma - 1))
+TStag  = T0 * (1 + ((gamma - 1)/2) * M0**2)
+rhoStag = rho0 * (1 + ((gamma - 1)/2) * M0**2)**(1/(gamma - 1))
+
+for i in range(1, len(A_List)):
+    ARatio = A_List[i]/Astar
+    mSolve = fsolve(fM, mExact_list[i-1], args=(ARatio))[0]
+
+    TExact = TStag / (1 + ((gamma - 1)/2) * mSolve**2)
+    vExact = mSolve * np.sqrt(gamma * R * TExact)
+    pExact = pStag * (TExact / TStag)**(gamma/(gamma - 1))
+
+    mExact_list.append(mSolve)
+    pExact_List.append(pExact)
+    TExact_List.append(TExact)
+    vExact_List.append(vExact)
+
+mExact_Array = np.array(mExact_list)
+pExact_Array = np.array(pExact_List)
+TExact_Array = np.array(TExact_List)
+vExact_Array = np.array(vExact_List)
+
+PercentError_v = np.array((np.abs(vExact_Array - v_List)/vExact_Array) * 100)
+
+PercentError_m = np.array((np.abs(mExact_Array - m_List)/mExact_Array) * 100)
+'''
+plt.plot(A_List, vExact_Array, 'k--', label='Isentropic Relations')
+plt.plot(A_List, v_List, 'r', label='Numerical')
+plt.xlabel('Cross Sectional Area(m^2)')
+plt.ylabel('Velocity (m/s)')
+plt.title('Velocity Comparison')
+plt.legend()
+plt.grid(True)
+'''
+plt.figure()
+plt.plot(A_List, mExact_Array, 'k--', label='Isentropic Relations')
+plt.plot(A_List, m_List, 'r', label='Numerical')
+plt.xlabel('Cross Sectional Area(m^2)')
+plt.ylabel('Mach Number')
+plt.title('Mach Comparison')
+plt.legend()
+plt.grid(True)
+
+plt.figure()
+plt.plot(A_List, PercentError_v, 'k--',label='Velocity (%) Error')
+plt.plot(A_List, PercentError_m, 'r', label='Mach Number (%) Error')
+plt.xlabel('Cross Sectional Area(m^2)')
+plt.ylabel('Percent Error (%)')
+plt.title('Percent Error Comparison Div Area')
+plt.legend()
+plt.grid(True)
+
+plt.show()
+

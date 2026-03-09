@@ -1,0 +1,27 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+def Velocity(x,t):
+    v = x/t
+    return v
+
+
+x0 = 1.0
+x = x0
+dt = 1.0
+
+tList = np.arange(0,11,dt) 
+xList = [x0]
+for t in tList[1: ]:
+    x = x + Velocity(x,t)*dt
+    xList.append(x)
+
+print(xList)
+print(tList)
+
+plt.plot(tList, xList, "o-")
+plt.title("Velocity Forward Euler's Method")
+plt.xlabel("time(t)")
+plt.ylabel("x(t)")
+plt.show()
+

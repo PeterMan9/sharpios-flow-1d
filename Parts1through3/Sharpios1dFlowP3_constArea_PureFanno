@@ -1,0 +1,412 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy
+from scipy.optimize import fsolve
+
+R = 296.8 #J/kgK
+L = 0.5 #m 
+f_darcy = 0.1
+Cf = f_darcy/4 #skin friction factor
+gamma = 1.4
+
+numSteps = 100000
+dx = L/numSteps
+xList = np.arange(0, L + dx, dx)
+r0 = 0.1 #m
+Dh = D = 2 * r0 #m
+A = np.pi * r0**2 #m^2 #constant area throughout 
+
+T0 = 300 #kelvin
+v0 = 270 # m/s
+P0 = 101000 #inital pressure Pa
+rho0 = P0/(R*T0) #inital density
+M0 = v0/np.sqrt(gamma * R * T0)
+print("Initial Mach Number: ", M0)
+cp = 1040  # J/(kg K)
+Tstag0 = T0 * ( 1 + ((gamma -1)/2) * M0**2)
+mdotInlet = rho0 * v0 * A #kg/s
+
+#injector
+Vinj = 0 # m/s
+Dinj = 0.01 #m
+Linj = 0.1 #m
+Ainj = np.pi * (Dinj/2)**2 #m^2
+injMdot = rho0 * Vinj * Ainj #kg/s
+
+x_injLocation = 0.35 #m
+injIndex = x_injLocation/dx #index of the center of the injector 
+injIndexRange = (Linj/2)/dx #range is +- so this is only half of total range
+inj_array = np.zeros(len(xList))
+
+starInj = max(0, int(injIndex - injIndexRange))
+endInj = min(len(xList), int(injIndex + injIndexRange))
+inj_array[starInj:endInj] = 0
+inj_array[endInj+1:] = 0
+
+
+
+#dhtdx profile
+qtotal = 0
+x_s = 0
+def dHtdx(x):
+    return (qtotal/L) * (x - x_s)
+
+temp = []
+temp.append(T0)
+
+velocities = []
+velocities.append(v0)
+
+pressure = []
+pressure.append(P0)
+
+density = []
+density.append(rho0)
+
+machNum = []
+machNum.append(M0)
+
+mdot = []
+mdot.append(mdotInlet)
+
+def mNum(v,a):
+    M = v/a
+    return M
+
+def soS(T):
+
+    a = np.sqrt(gamma * R * T)
+    return a
+
+def dVdx(M, T,V,localdHtdx, localMdot,dMdotdx):
+    part1 = ((V/((1 - M**2) * cp * T)) * localdHtdx)
+    part2 = (gamma * M**2)/(2 * (1 - M**2))
+    part3 = ((4*Cf * V/Dh) - ((Vinj/localMdot) * dMdotdx))
+    return part1 + part2 * part3
+
+def dPdx(M, T, P, V, localdHtdx, localMdot, dMdotdx):
+    part1 = (-((gamma * M**2 * P)/((1-M**2) * cp * T)) * localdHtdx)
+    part2 = ((gamma * M**2 * (1 + (gamma-1)*M**2))/(2 * (1 - M**2)))
+    part3 = ((4*Cf * P/Dh) - (2 * ((Vinj * P)/localMdot * V) * dMdotdx))
+    return part1 - part2 * part3
+
+def rhonP1(rho,V1, V2):
+    denNP1 = (rho * V1)/(V2)
+    return denNP1
+
+#will do forward eulers first 
+def vnP1(dvdx, v):
+    vNP1 = v + (dvdx * dx)
+    return vNP1
+
+def pnP1(dpdx, P):
+    pNP1 = P + (dpdx * dx)
+    return pNP1
+
+
+#rk4
+PtgPtStarRatio = 1.05454264
+Pt0 = P0 * (1 + ((gamma -1)/2) * M0**2)**(gamma/(gamma-1))
+PtStar = Pt0/PtgPtStarRatio
+
+def pt_ptstar(M):
+    return  (1/M) * (( 2 + (gamma -1) * M**2)/(gamma + 1))**((gamma+1)/(2*(gamma-1)))
+
+pt = []
+pt.append(Pt0)
+def dMdx(M):
+    term1 = ((2 * Cf * gamma)/Dh)
+    term2 = (M**3)/(1 - M**2)
+    term3 = (1 + (gamma-1)/2 * M**2)
+    return term1 * term2 * term3
+
+def rk4M(M):
+    k1 = dMdx(M)
+    k2 = dMdx(M + 0.5*dx*k1)
+    k3 = dMdx(M + 0.5*dx*k2)
+    k4 = dMdx(M + dx*k3)
+
+    Mnew = M + (dx/6)*(k1 + 2*k2 + 2*k3 + k4)
+    
+    return Mnew
+'''
+for n in range(1, len(xList)):
+    
+    dHtdxLocal = dHtdx(xList[n-1])
+
+    if inj_array[n-1] == 0:
+        dMdotpreInj = 0
+        v = vnP1(
+            dVdx(
+                machNum[n-1],
+                temp[n-1],
+                velocities[n-1],
+                dHtdxLocal,
+                mdotInlet,
+                dMdotpreInj
+            ),
+            velocities[n-1]
+            )
+        p = pnP1(
+            dPdx(
+                machNum[n-1],
+                temp[n-1],
+                pressure[n-1],
+                velocities[n-1],
+                dHtdxLocal,
+                mdotInlet,
+                dMdotpreInj
+            ),
+            pressure[n-1]
+            )
+        
+        velocities.append(v)
+        rho = rhonP1(density[n-1], velocities[n-1], velocities[n])
+        pressure.append(p)
+        density.append(rho)
+        temp.append(pressure[n]/(density[n] * R))
+        machNum.append(mNum(velocities[n], soS(temp[n])))
+
+    elif inj_array[n-1] == 1:
+        dMdotdxInj = injMdot/Linj
+        localMdot = mdotInlet + (dMdotdxInj) * (xList[n-1] - (x_injLocation - Linj/2))
+        v = vnP1(
+            dVdx(
+                machNum[n-1],
+                temp[n-1],
+                velocities[n-1],
+                dHtdxLocal,
+                localMdot,
+                dMdotdxInj
+            ),
+            velocities[n-1]
+            )
+        p = pnP1(
+            dPdx(
+                machNum[n-1],
+                temp[n-1],
+                pressure[n-1],
+                velocities[n-1],
+                dHtdxLocal,
+                localMdot,
+                dMdotdxInj
+            ),
+            pressure[n-1]
+            )
+        
+        velocities.append(v)
+        rho = localMdot/(A * velocities[n])
+        pressure.append(p)
+        density.append(rho)
+        temp.append(pressure[n]/(density[n] * R))
+        machNum.append(mNum(velocities[n], soS(temp[n])))
+
+    else:
+        dMdotdxpostInj = 0
+        localMdot2 = mdotInlet + injMdot
+        v = vnP1(
+            dVdx(
+                machNum[n-1],
+                temp[n-1],
+                velocities[n-1],
+                dHtdxLocal,
+                localMdot2,
+                dMdotdxpostInj
+            ),
+            velocities[n-1]
+            )
+        p = pnP1(
+            dPdx(
+                machNum[n-1],
+                temp[n-1],
+                pressure[n-1],
+                velocities[n-1],
+                dHtdxLocal,
+                localMdot2,
+                dMdotdxpostInj
+            ),
+            pressure[n-1]
+            )
+        
+        velocities.append(v)
+        rho = rhonP1(density[n-1], velocities[n-1], velocities[n])
+        pressure.append(p)
+        density.append(rho)
+        temp.append(pressure[n]/(density[n] * R))
+        machNum.append(mNum(velocities[n], soS(temp[n])))
+
+    if temp[n] < 0:
+        print("Temperature has dropped below zero Kelvin at x = ", xList[n], "m")
+        print("Mach Number: ", machNum[n])
+        print("Velocity: ", velocities[n], "m/s")
+    
+    if machNum[n-1] >= 1:
+        print(f"Flow choked at step {n-1}, Mach = {machNum[-1]:.3f}")
+        break
+'''
+for i in range(1, len(xList)):
+    
+    dHtdxLocal = dHtdx(xList[i-1])
+
+    if inj_array[i-1] == 0:
+        dMdotpreInj = 0
+        #suffix N means New or next
+        MachN = rk4M(machNum[i-1])
+        TempN = (Tstag0/(1 + ((gamma -1)/2) * MachN**2))
+        aN = soS(TempN)
+        vN = MachN * aN
+        ptN = PtStar * pt_ptstar(MachN)
+        pN = ptN / ((1 + ((gamma-1)/2) * MachN**2)**(gamma/(gamma-1)))
+
+
+        machNum.append(MachN)
+        pt.append(ptN)
+        velocities.append(vN)
+        temp.append(TempN)
+        rho = rhonP1(density[i-1], velocities[i-1], velocities[i])
+        pressure.append(pN)
+        density.append(rho)
+       
+
+v_List = np.array(velocities)
+p_List = np.array(pressure)
+t_List = np.array(temp)
+m_List = np.array(machNum)
+x_List = np.array(xList[:len(velocities)])
+pt_List = np.array(pt)
+
+#Fanno Analytical Solution for comparison
+
+mExactList = []
+mExactList.append(M0)
+
+vExactList = []
+vExactList.append(v0)
+
+pExactList = []
+pExactList.append(P0)
+
+TExactList = []
+TExactList.append(T0)
+
+ptExactList = []
+ptExactList.append(Pt0)
+
+def T_Tstar (M):
+    return (gamma + 1)/(2 + (gamma-1) *M**2)
+def P_Pstar (M):
+    return (1/M) * np.sqrt((gamma + 1)/(2 + (gamma - 1) * M**2))
+def Pt_Ptstar (M):
+    return (1/M) * ((2 + (gamma - 1) * M**2)/(gamma + 1))**((gamma+1)/(2*(gamma-1)))
+
+Tstar = T0/T_Tstar(M0)
+Pstar = P0/P_Pstar(M0)
+PtStar = P0/Pt_Ptstar(M0)
+
+def fanno_MachRelation(M1,M2):
+    part1=(gamma + 1)/(2 * gamma) * np.log((2 + (gamma -1) * M2**2)/(2 + (gamma-1) * M1**2))
+    part2 = -(1/gamma) * ((1/M2**2)-(1/M1**2))
+    part3 = -((gamma+1)/(2*gamma)) * np.log((M2**2)/M1**2)
+    return part1 + part2 + part3
+
+def fM(M2,M1):  #M2 unknown so it goes first (for fsolve reasons)
+    return fanno_MachRelation(M1,M2) - ((f_darcy * dx)/Dh)
+
+def pt1_pt2(M1,M2):
+    return (M1/M2) * ((2 + (gamma-1) * M2**2)/(2 + (gamma-1) * M1**2))**((gamma+1)/(2 * (gamma-1)))
+
+for n in range(1, len(xList)):
+    
+    ptExactNew = pt1_pt2(m_List[n-1],m_List[n]) * ptExactList[n-1]
+    ptExactList.append(ptExactNew)
+    
+    
+    M1Exact = mExactList[n-1]
+    M2Guess = M1Exact
+    M2Exact = fsolve(fM, M2Guess, args=(M1Exact,))[0]
+    mExactList.append(M2Exact) 
+    
+    TExact = Tstar * T_Tstar(M2Exact)
+    PExact = Pstar * P_Pstar(M2Exact)
+    vExact = (M2Exact * np.sqrt(gamma * R * TExact))
+    TExactList.append(TExact)
+    vExactList.append(vExact)
+    pExactList.append(PExact)
+    
+    if mExactList[n-1] >= 1:
+        print(f"Flow choked at step {n-1}, Mach = {machNum[-1]:.3f}")
+        break
+        
+mExact_Array = np.array(mExactList)
+TExact_Array = np.array(TExactList)
+pExact_Array = np.array(pExactList)
+vExact_Array = np.array(vExactList)
+ptExact_Array = np.array(ptExactList)
+
+v_ListUPD = np.array(v_List[:len(vExact_Array)]) #just cutting my v_list to match lengths for error calc
+m_ListUPD = np.array(m_List[:len(mExact_Array)])
+x_ListUPD = np.array(x_List[:len(mExact_Array)])
+pt_ListUPDAnalytical = np.array(pt_List[:len(mExact_Array)])
+pt_ListUPDNumerical = np.array(ptExact_Array[:len(mExact_Array)])
+
+PercentError_v = np.array((np.abs(vExact_Array - v_ListUPD)/vExact_Array) * 100)
+Percenterror_pt = np.array((np.abs(pt_ListUPDNumerical - pt_ListUPDAnalytical)/pt_ListUPDNumerical) * 100)
+PercentError_m = np.array((np.abs(mExact_Array - m_ListUPD)/mExact_Array) * 100)
+
+
+
+
+plt.figure()
+plt.plot(x_ListUPD, pt_ListUPDAnalytical)
+plt.xlabel('Length (m))')
+plt.ylabel('Stagnation Pressure')
+plt.title('Stagnation Pressure vs X Analytical')
+plt.grid(True)
+
+
+
+plt.figure()
+plt.plot(x_ListUPD, pt_ListUPDNumerical)
+plt.xlabel('Length (m))')
+plt.ylabel('Stagnation Pressure')
+plt.title('Stagnation Pressure vs X Numerical')
+plt.grid(True)
+
+plt.figure()
+plt.plot(x_ListUPD, Percenterror_pt, 'k--',label='Stagnation Pressure (%) Error')
+plt.xlabel('Length (m))')
+plt.ylabel('Percent Error (%)')
+plt.title('Percent Error Comparison Const Area')
+plt.legend()
+plt.grid(True)
+
+
+
+
+'''
+plt.figure()
+plt.plot(x_ListUPD, PercentError_v, 'k--',label='Velocity (%) Error')
+plt.plot(x_ListUPD, PercentError_m, 'r', label='Mach Number (%) Error')
+plt.xlabel('Length (m))')
+plt.ylabel('Percent Error (%)')
+plt.title('Percent Error Comparison Const Area')
+plt.legend()
+plt.grid(True)
+
+plt.figure()
+plt.plot(x_List,m_List)
+plt.xlabel('Length (m))')
+plt.ylabel("Mach Number")
+plt.grid(True)
+plt.figure()
+plt.plot(x_ListUPD, Percenterror_pt, 'k--',label='Stagnation Pressure (%) Error')
+plt.xlabel('Length (m))')
+plt.ylabel('Percent Error (%)')
+plt.title('Percent Error Comparison Const Area')
+plt.legend()
+plt.grid(True)
+'''
+
+
+plt.show()
+

@@ -1,0 +1,247 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy
+from scipy.optimize import fsolve
+
+R = 296.8 #J/kgK
+L = 0.5 #m 
+Cf = 0.005 #skin friction factor
+gamma = 1.4
+
+numSteps = 100000
+dx = L/numSteps
+xList = np.arange(0, L + dx, dx)
+r0 = 0.1 #m
+Dh = D = 2 * r0 #m
+A = np.pi * r0**2 #m^2 #constant area throughout 
+
+T0 = 300 #kelvin
+v0 = 500 # m/s
+P0 = 101000 #inital pressure Pa
+rho0 = P0/(R*T0) #inital density
+M0 = v0/np.sqrt(gamma * R * T0)
+cp = 1040  # J/(kg K)
+Tstag0 = T0 * ( 1 + ((gamma -1)/2) * M0**2)
+mdotInlet = rho0 * v0 * A #kg/s
+
+#injector
+Vinj = 10 # m/s
+Dinj = 0.01 #m
+Linj = 0.1 #m
+Ainj = np.pi * (Dinj/2)**2 #m^2
+injMdot = rho0 * Vinj * Ainj #kg/s
+
+x_injLocation = 0.35 #m
+injIndex = x_injLocation/dx #index of the center of the injector 
+injIndexRange = (Linj/2)/dx #range is +- so this is only half of total range
+inj_array = np.zeros(len(xList))
+
+starInj = max(0, int(injIndex - injIndexRange))
+endInj = min(len(xList), int(injIndex + injIndexRange))
+inj_array[starInj:endInj] = 1
+inj_array[endInj+1:] = 2
+
+
+
+#dhtdx profile
+qtotal = 200e3
+x_s = 0
+def dHtdx(x):
+    return (qtotal/L) * (x - x_s)
+
+temp = []
+temp.append(T0)
+
+velocities = []
+velocities.append(v0)
+
+pressure = []
+pressure.append(P0)
+
+density = []
+density.append(rho0)
+
+machNum = []
+machNum.append(M0)
+
+mdot = []
+mdot.append(mdotInlet)
+
+def mNum(v,a):
+    M = v/a
+    return M
+
+def soS(T):
+
+    a = np.sqrt(gamma * R * T)
+    return a
+
+def dVdx(M, T,V,localdHtdx, localMdot,dMdotdx):
+    part1 = ((V/((1 - M**2) * cp * T)) * localdHtdx)
+    part2 = (gamma * M**2)/(2 * (1 - M**2))
+    part3 = ((4*Cf * V/Dh) - ((Vinj/localMdot) * dMdotdx))
+    return part1 + part2 * part3
+
+def dPdx(M, T, P, V, localdHtdx, localMdot, dMdotdx):
+    part1 = (-((gamma * M**2 * P)/((1-M**2) * cp * T)) * localdHtdx)
+    part2 = ((gamma * M**2 * (1 + (gamma-1)*M**2))/(2 * (1 - M**2)))
+    part3 = ((4*Cf * P/Dh) - (2 * ((Vinj * P)/localMdot * V) * dMdotdx))
+    return part1 - part2 * part3
+
+def rhonP1(rho,V1, V2):
+    denNP1 = (rho * V1)/(V2)
+    return denNP1
+
+def vnP1(dvdx, v):
+    vNP1 = v + (dvdx * dx)
+    return vNP1
+
+def pnP1(dpdx, P):
+    pNP1 = P + (dpdx * dx)
+    return pNP1
+#will do forward eulers first 
+
+for n in range(1, len(xList)):
+    
+    dHtdxLocal = dHtdx(xList[n-1])
+
+    if inj_array[n-1] == 0:
+        dMdotpreInj = 0
+        v = vnP1(
+            dVdx(
+                machNum[n-1],
+                temp[n-1],
+                velocities[n-1],
+                dHtdxLocal,
+                mdotInlet,
+                dMdotpreInj
+            ),
+            velocities[n-1]
+            )
+        p = pnP1(
+            dPdx(
+                machNum[n-1],
+                temp[n-1],
+                pressure[n-1],
+                velocities[n-1],
+                dHtdxLocal,
+                mdotInlet,
+                dMdotpreInj
+            ),
+            pressure[n-1]
+            )
+        
+        velocities.append(v)
+        rho = rhonP1(density[n-1], velocities[n-1], velocities[n])
+        pressure.append(p)
+        density.append(rho)
+        temp.append(pressure[n]/(density[n] * R))
+        machNum.append(mNum(velocities[n], soS(temp[n])))
+
+    elif inj_array[n-1] == 1:
+        dMdotdxInj = injMdot/Linj
+        localMdot = mdotInlet + (dMdotdxInj) * (xList[n-1] - (x_injLocation - Linj/2))
+        v = vnP1(
+            dVdx(
+                machNum[n-1],
+                temp[n-1],
+                velocities[n-1],
+                dHtdxLocal,
+                localMdot,
+                dMdotdxInj
+            ),
+            velocities[n-1]
+            )
+        p = pnP1(
+            dPdx(
+                machNum[n-1],
+                temp[n-1],
+                pressure[n-1],
+                velocities[n-1],
+                dHtdxLocal,
+                localMdot,
+                dMdotdxInj
+            ),
+            pressure[n-1]
+            )
+        
+        velocities.append(v)
+        rho = localMdot/(A * velocities[n])
+        pressure.append(p)
+        density.append(rho)
+        temp.append(pressure[n]/(density[n] * R))
+        machNum.append(mNum(velocities[n], soS(temp[n])))
+
+    else:
+        dMdotdxpostInj = 0
+        localMdot2 = mdotInlet + injMdot
+        v = vnP1(
+            dVdx(
+                machNum[n-1],
+                temp[n-1],
+                velocities[n-1],
+                dHtdxLocal,
+                localMdot2,
+                dMdotdxpostInj
+            ),
+            velocities[n-1]
+            )
+        p = pnP1(
+            dPdx(
+                machNum[n-1],
+                temp[n-1],
+                pressure[n-1],
+                velocities[n-1],
+                dHtdxLocal,
+                localMdot2,
+                dMdotdxpostInj
+            ),
+            pressure[n-1]
+            )
+        
+        velocities.append(v)
+        rho = rhonP1(density[n-1], velocities[n-1], velocities[n])
+        pressure.append(p)
+        density.append(rho)
+        temp.append(pressure[n]/(density[n] * R))
+        machNum.append(mNum(velocities[n], soS(temp[n])))
+
+    if temp[n] < 0:
+        print("Temperature has dropped below zero Kelvin at x = ", xList[n], "m")
+        print("Mach Number: ", machNum[n])
+        print("Velocity: ", velocities[n], "m/s")
+    
+    if machNum[n] <= 1:
+        print(f"Flow choked at step {n-1}, Mach = {machNum[-1]:.3f}")
+        break
+
+
+        
+    
+
+v_List = np.array(velocities)
+p_List = np.array(pressure)
+t_List = np.array(temp)
+m_List = np.array(machNum)
+x_List = np.array(xList[:len(velocities)])
+
+
+plt.figure()
+plt.plot(x_List,v_List)
+plt.xlabel('Length (m))')
+plt.ylabel("Velocity (m/s)")
+plt.grid(True)
+
+plt.figure()
+plt.plot(x_List,m_List)
+plt.xlabel('Length (m))')
+plt.ylabel("Mach Number")
+plt.grid(True)
+
+plt.figure()
+plt.plot(x_List,t_List)
+plt.xlabel('Length (m))')
+plt.ylabel("Temperature (K)")
+plt.grid(True)
+
+plt.show()

@@ -1,0 +1,37 @@
+import numpy as np
+import scipy
+Pstag = 5171070
+Pstatic = 4481594
+Pinternal = Pstag
+Pexternal = 101325
+gamma = 1.4
+R = 296.8
+M = 0.45680025
+mdot = 0.3
+Do = (1)/39.37 #in to m
+
+Aratio = 1.43218644
+Tenv = 50 + 273
+Tstag = Tenv * (1+((gamma-1)/2)*M**2)
+
+Astar = mdot/(
+            Pstag * 
+            np.sqrt(gamma/(R * Tstag))*
+            (2/(gamma+1))**(((gamma+1)/(2*(gamma-1)))))
+
+Aorifice  = Aratio * Astar
+IDorfice = np.sqrt((4*Aorifice)/np.pi)
+print("Area of the Aorifice is (in^2):", Aorifice*1550)
+print("Diameter of the orifice (in):", IDorfice*39.37, "\n")
+
+Apipe = np.pi * (0.0038608/2)**2
+print("Apipe (in^2):", Apipe * 1550)
+print("Pipe Diameter (in):", 0.0038608 * 39.37, "\n")
+
+#choosing orifice OD based on wall thickness
+hoopStress = 1000 * 6894.76
+t = ( (Pinternal - Pexternal) * Do ) / (2 * hoopStress)
+print("Minimum required wall thickness (in):", t * 39.37)
+PipeID = Do - 2*t
+print("Pipe ID (in):", PipeID * 39.37, "\n")
+
