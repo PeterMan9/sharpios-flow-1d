@@ -17,3 +17,6 @@ very weird spiking in entropy and stag pressure at around 0.375m under multiple 
 
 Things to talk with Ral about at the meeting - ways to debug this because it is seemingly very strange
 Send him my power point slides 
+
+First test: 
+    everything zero ( no heat, friction, injection)

@@ -10,7 +10,6 @@ import cantera as ct
 
 
 #preburner conditions 
-mdotpreburner = 1.2 #kg/s
 
 R = 296.8 #J/kgK
 L = 0.5 #m 
@@ -18,30 +17,72 @@ f_darcy = 0.01
 Cf = f_darcy/4 #skin friction factor
 gamma0 = 1.4
 
-numSteps = 100000
+numSteps = 2e5
 dx = L/numSteps
 xList = np.arange(0, L + dx, dx)
+
+############################
+# GEOMETRY
+############################
+
+# region Geometry and area Functions
+
 r0 = 0.0127 #m
 D0 = 2 * r0 #m
 A0 = np.pi * r0**2 #m^2
 Astar = A0/25 #m^2
 rStar = np.sqrt(Astar/np.pi) #m
 
+
+
 def Area(x):
-    if x <= 0.75 * L:
-        return A0
+    x1 = 0.75 * L
+    x2 = L
+
+    if x <= x1:
+        r = r0
+    elif x >= x2:
+        r = rStar
     else:
-        rX = r0 - ( (r0 - rStar)/L ) * 0.1*x
-        A = np.pi * rX**2
-        return A
+        xi = (x - x1) / (x2 - x1)
+        s = 6*xi**5 - 15*xi**4 + 10*xi**3
+        r = r0 - (r0 - rStar) * s
+
+    return np.pi * r**2
 
 def Dh(x):
-    if x <= 0.75 * L:
-        return D0
+    x1 = 0.75 * L
+    x2 = L
+
+    if x <= x1:
+        r = r0
+    elif x >= x2:
+        r = rStar
     else:
-        rX = r0 - ( (r0 - rStar)/L ) * 0.1*x
-        D_h = 2 * rX
-    return D_h
+        xi = (x - x1) / (x2 - x1)
+        s = 6*xi**5 - 15*xi**4 + 10*xi**3
+        r = r0 - (r0 - rStar) * s
+
+    return 2*r
+
+def dAdx(x):
+    x1 = 0.75 * L 
+    x2 = L
+    xi = (x - x1) / (x2 - x1)
+    drdx =  - (r0 - rStar) * (30*xi**4 - 60*xi**3 + 30*xi**2) / (x2 - x1)
+    r = np.sqrt(Area(x)/np.pi)
+
+    if x <x1:
+        dadx = 0
+    elif x < x2:
+        dadx = 2 * np.pi * r * drdx
+    else:
+        dadx = 0
+    return dadx
+
+
+# endregion
+
 
 def mNum(v,a): #mach number 
     M = v/a
@@ -52,11 +93,19 @@ def soS(T): #solving for a using variable gamma and Cp
     a = np.sqrt(gammA * R * T)
     return a
 
+
+def delMdotdx(mdotn1, mdotn,x1,x): #dmdot/dx function
+    return (mdotn1 - mdotn)/(x1-x)
+
+
 #dhtdx profile
 qtotal = 200e3
 x_s = 0
+
 def dHtdx(x):#dht/dx profile - quadtratic Ht
     return (qtotal/L) * (x - x_s)
+
+#region Nasa Polynomials
 
 def CpNasa(T): #solving variable Cp with NASA polynomials for N2 
     return (0.02926640*10**2 + 0.14879768E-02 * T - 0.05684760E-05 * T**2 + 0.10097038E-09 * T**3 - 0.06753351E-13 * T**4) * R
@@ -68,11 +117,10 @@ def gamma(T):#solving for gamma using
 def hTNasa(T): #solving for static enthalpy using NASA polynomials for N2
     return (0.02926640*10**2 + (0.14879768E-02 * T)/2 - (0.05684760E-05 * T**2)/3 + (0.10097038E-09 * T**3)/4 - (0.06753351E-13 * T**4)/5) * R * T
 
-def delAdx (An1,An,x1,x): #dA/dx function
-    return (An1 - An)/(x1-x)
+#endregion
 
-def delMdotdx(mdotn1, mdotn,x1,x): #dmdot/dx function
-    return (mdotn1 - mdotn)/(x1-x)
+
+#region Functions for solving ODEs -functions that solve for dV/dx and dP/dx - based off of 1d sharpios flow equations 
 
 def dVdX (V,A,M,cp,T,dAdX,localdHtdx,mdot,DMDOTDX,Dh): #first 4 parts of sharpios 1d flow eqn converted to dV/dx
     gammA = gamma(T)
@@ -91,6 +139,8 @@ def dPdX (P,V,A,M,cp,T,DADX,localdHtdx,mdot,DMDOTDX,Dh): #first 4 parts of sharp
     term4 = (((4 * Cf * (P/Dh))) - (2 * ((Vinj * P)/(mdot * V)) * (DMDOTDX)))
     term5 = -(((2 * gammA * M**2 * (1 + ((gammA-1)/2) *M**2)*P)/((1-M**2)*mdot)) * (DMDOTDX))
     return term1 + term2 + (term3 * term4) + term5
+#endregion
+
 
 def pressureStagFunc(P,M,T):
     gammA = gamma(T)
@@ -101,9 +151,10 @@ def pressureStagEntropyFunc(pstag1,entropy1,entropy2): #wrong for now, need to h
     pstag2 = pstag1 * np.exp(-(entropy2 - entropy1)/R)
     return pstag2
 
-################################################
 
-##########################3
+#region mixing CV inital conditions and mixing CV to preburner inlet functions 
+
+
 #Defining cv for mixing 
 #3 injectors - 2 of the same and one bigger one. 
 #pressure, temp, Area, Mach number are the all known for the injectors 
@@ -136,7 +187,7 @@ TB = 300 #K
 
 M1 = 0.5
 M2 = 0.5
-M3 = 0.44
+M3 = 0.6
 
 a1 = soS(TA)
 a2 = soS(TA_2)
@@ -161,6 +212,7 @@ mdotB = mdot3 #big injector
 mdot_i = mdotA + mdotB
 
 A_CV_END = A0 #area at the end of the CV is the same as the area at the start of the preburner inlet.
+
 
 def E1_CV(ui,Ti):
     return ui - (mdotA/mdot_i) * uA - (mdotB/mdot_i) * uB - (mdotA * R * TA)/(mdot_i * uA) - (mdotB * R * TB)/(mdot_i * uB) + (R * Ti)/ui
@@ -212,8 +264,9 @@ def CV_toPreburner(u2,T2): #this is newton raphson for the CV it goes from state
 
     print("Converged in ", numIters, " iterations")
     return u2, T2
+#endregion
 
-
+#rk4 function
 def rk4Step(V,P, i): 
     #rk4 dvdx is coupled with dhtdx so have to solve both odes - no need to rk4 Ht and etc tho cuz i know dhtdx profile
     # doing rk4 only on V and P. can solve using two options. the easy way which is through mdot and ideal gas law other 
@@ -232,8 +285,8 @@ def rk4Step(V,P, i):
     cp1 = CpNasa(T1)
     a1 = soS(T1)
     M1 = mNum(V1,a1)
-    k1V = dVdX(V1,A1,M1,cp1,T1,delAdx(Area(x),Area(x-dx),x1,x1-dx),dHtdx1,mdot[i],delMdotdx(mdot[i],mdot[i-1],x1,x1-dx),Dh(x))
-    k1P = dPdX(P1,V1,A1,M1,cp1,T1,delAdx(Area(x),Area(x-dx),x1,x1-dx),dHtdx1,mdot[i],delMdotdx(mdot[i],mdot[i-1],x1,x1-dx),Dh(x))
+    k1V = dVdX(V1,A1,M1,cp1,T1,dAdx(x1),dHtdx1,mdot[i],delMdotdx(mdot[i],mdot[i-1],x1,x1-dx),Dh(x))
+    k1P = dPdX(P1,V1,A1,M1,cp1,T1,dAdx(x1),dHtdx1,mdot[i],delMdotdx(mdot[i],mdot[i-1],x1,x1-dx),Dh(x))
 
     #k2
     V2 = V + (k1V * dx/2)
@@ -246,8 +299,8 @@ def rk4Step(V,P, i):
     a2 = soS(T2)
     M2 = mNum(V2,a2)
     A2 = Area(x2)
-    k2V = dVdX(V2,A2,M2,cp2,T2,delAdx(Area(x2),Area(x1),x2,x1),dHtdx2,mdot[i],delMdotdx(mdot[i],mdot[i-1],x2,x1),Dh(x2))
-    k2P = dPdX(P2,V2,A2,M2,cp2,T2,delAdx(Area(x2),Area(x1),x2,x1),dHtdx2,mdot[i],delMdotdx(mdot[i],mdot[i-1],x2,x1),Dh(x2))
+    k2V = dVdX(V2,A2,M2,cp2,T2,dAdx(x2),dHtdx2,mdot[i],delMdotdx(mdot[i],mdot[i-1],x2,x1),Dh(x2))
+    k2P = dPdX(P2,V2,A2,M2,cp2,T2,dAdx(x2),dHtdx2,mdot[i],delMdotdx(mdot[i],mdot[i-1],x2,x1),Dh(x2))
 
     #k3
     V3 = V + (k2V * dx/2)
@@ -260,8 +313,8 @@ def rk4Step(V,P, i):
     a3 = soS(T3)
     M3 = mNum(V3,a3)
     A3 = Area(x3)
-    k3V = dVdX(V3,A3,M3,cp3,T3,delAdx(Area(x3),Area(x1),x3,x1),dHtdx3,mdot[i],delMdotdx(mdot[i],mdot[i-1],x3,x1),Dh(x3))
-    k3P = dPdX(P3,V3,A3,M3,cp3,T3,delAdx(Area(x3),Area(x1),x3,x1),dHtdx3,mdot[i],delMdotdx(mdot[i],mdot[i-1],x3,x1),Dh(x3))  
+    k3V = dVdX(V3,A3,M3,cp3,T3,dAdx(x3),dHtdx3,mdot[i],delMdotdx(mdot[i],mdot[i-1],x3,x1),Dh(x3))
+    k3P = dPdX(P3,V3,A3,M3,cp3,T3,dAdx(x3),dHtdx3,mdot[i],delMdotdx(mdot[i],mdot[i-1],x3,x1),Dh(x3))  
 
     #k4
     V4 = V + (k3V * dx)
@@ -274,14 +327,15 @@ def rk4Step(V,P, i):
     a4 = soS(T4)
     M4 = mNum(V4,a4)
     A4 = Area(x4)
-    k4V = dVdX(V4,A4,M4,cp4,T4,delAdx(Area(x4),Area(x1),x4,x1),dHtdx4,mdot[i],delMdotdx(mdot[i],mdot[i-1],x4,x1),Dh(x4))
-    k4P = dPdX(P4,V4,A4,M4,cp4,T4,delAdx(Area(x4),Area(x1),x4,x1),dHtdx4,mdot[i],delMdotdx(mdot[i],mdot[i-1],x4,x1),Dh(x4))
+    k4V = dVdX(V4,A4,M4,cp4,T4,dAdx(x4),dHtdx4,mdot[i],delMdotdx(mdot[i],mdot[i-1],x4,x1),Dh(x4))
+    k4P = dPdX(P4,V4,A4,M4,cp4,T4,dAdx(x4),dHtdx4,mdot[i],delMdotdx(mdot[i],mdot[i-1],x4,x1),Dh(x4))
 
     Vnext = V + (1/6) * (k1V + 2*k2V + 2*k3V + k4V) * dx
     Pnext = P + (1/6) * (k1P + 2*k2P + 2*k3P + k4P) * dx
     return Vnext, Pnext
 
-#########################################################################################
+
+#region Solving/Defining inital conditons for the preburner inlet - initializing arrays to store values etc
 
 def P_rho_InitialValues(ui,Ti): #finding the rest of the initial values for the preburner inlet
     rho = mdot_i/(A_CV_END * ui)
@@ -328,8 +382,16 @@ pressureStag_entropy = []
 pressureStag_entropy.append(Pstag_Preburner_Inlet)
 
 
+mdot = np.full(len(xList), mdot_i)
+
 mdotReconsturcted = []
 mdotReconsturcted.append(mdot_i)
+
+areaList = []
+areaList.append(Area(0)) #area at the inlet of the preburner
+
+dAdxList = []
+dAdxList.append(0)
 
 entropy = []
 
@@ -338,16 +400,16 @@ gas.TPX = T_Preburner, P_preburner, {'N2': 1.0}
 sInitial = gas.entropy_mass
 entropy.append(sInitial)
 
-#########################################################
-mdot = np.full(len(xList), mdot_i)
+#endregion
 
-#injector
-Vinj = 100 # m/s speed of N2 being injected (alr converted to x direction)
-Dinj = 0.01 #m Injector diameter
+#region Injector 
+
+Vinj = 250 # m/s speed of N2 being injected (alr converted to x direction)
+Dinj = 0.003175 #m Injector diameter
 Ainj = np.pi * (Dinj/2)**2 #m^2 
 injMdot = rho_Preburner * Vinj * Ainj #kg/s
 
-x_injLocation = 0.05 #m
+x_injLocation = 0.15 * L #m
 injIndex = int(x_injLocation/dx) #index of the center of the injector 
 injIndexRange = int((Dinj/2)/dx) #range is +- so this is only half of total inj diameter
 inj_array = np.zeros(len(xList)) #array to hold injector locations (0 means no injector 1 means injector, 2 means post injector)
@@ -360,13 +422,15 @@ inj_array[endInj+1:] = 2    #mark post injector locations +1 to start 1 after th
 mdot[startInj:endInj+1] = mdot_i + injMdot #add injector mass flow to main flow at injector location
 mdot[endInj+1:] = mdot_i + injMdot #post injector mass flow
 
+#endregion
 
-
-############################################################################################################################
-
+#solving flow through Preburner
 for i in range(1, len(xList)): #actual for loop for solving everything. only updating value vectors (velocity, pressure, rho etc)  
     xCurrent = xList[i]        # after everything in current state is solved to avoid mess ups
     localAreaCurrent = Area(xCurrent)
+    areaList.append(localAreaCurrent)
+    dAdXCurrent = dAdx(xCurrent)
+    dAdxList.append(dAdXCurrent)
 
     Vbefore = velocities[i-1]
     Pbefore = pressure[i-1]
@@ -388,6 +452,7 @@ for i in range(1, len(xList)): #actual for loop for solving everything. only upd
     entropy.append(sCurrent)
     pressureStag_entropy.append(pressureStagEntropyFunc(pressureStag_entropy[i-1],entropy[i-1],entropy[i]))
 
+    
     if machNum[i] >= 1:
         print("Flow is choked at x = ", xCurrent)
         break
@@ -402,35 +467,28 @@ M_List = np.array(machNum)
 pStag_List = np.array(pressureStag)
 pStagEntropyFunc_List = np.array(pressureStag_entropy)
 
+
 x_List = np.array(xList[:len(V_List)])
+Area_List = np.array(areaList)
+dAdx_List = np.array(dAdxList)
+
 mdot_List = np.array(mdot)
 mdotReconsturcted_List = np.array(mdotReconsturcted)
 entropy_List = np.array(entropy)
 
 
+
+print("Final Mach Number:", M_List[-1])
+
+
 #plotting results 
 '''
-
-
-
-
-
-
-
 plt.figure() #Plotting mdot residuals as a way to debug mdot and make sure my V, rho etc calc correctly
 plt.plot(x_List,mdotReconsturcted_List[:len(x_List)] - mdot_List[:len(x_List)])
 plt.xlabel('x (m)')
 plt.ylabel('Mdot (kg/s)')
 plt.title('Plotting Residuals for mDot')
 plt.grid()
-'''
-plt.figure() #plotting entropy. All looks good but seems to drop right at the choking point (mach one)
-plt.plot(x_List, entropy_List) #i am assuming this is just because the equations start to explode and results in temp being off and there for lowering entropy
-plt.xlabel('x (m)')
-plt.ylabel('Entropy (J/(kg * K))')
-plt.title('Plotting Entropy with Cantera')
-plt.grid()
-
 
 plt.figure()
 plt.plot(x_List, pStag_List)
@@ -439,6 +497,34 @@ plt.ylabel('Pressure Stagnation (Pa)')
 plt.title('Plotting Pressure Stagnation')
 plt.grid()
 
+plt.figure()
+plt.plot(x_List, entropy_List)
+plt.xlabel('x (m)')
+plt.ylabel('Entropy (J/kg/K)')
+plt.title('Plotting Entropy')
+plt.grid()
+
+plt.figure()
+plt.plot(x_List, Area_List)
+plt.xlabel('x (m)')
+plt.ylabel('Area (m^2)')
+plt.title('Plotting Area')
+plt.grid()
+
+plt.figure()
+plt.plot(x_List, dAdx_List)
+plt.xlabel('x (m)')
+plt.ylabel('dA/dx')
+plt.title('Plotting dA/dx')
+plt.grid()
+'''
+
+plt.figure()
+plt.plot(x_List, entropy_List)
+plt.xlabel('x (m)')
+plt.ylabel('Entropy (J/kg/K)')
+plt.title('Plotting Entropy')
+plt.grid()
 
 plt.show()
 
