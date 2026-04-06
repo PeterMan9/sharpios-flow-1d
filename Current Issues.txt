@@ -1,0 +1,5 @@
+Current Issues:
+My main issue rn is that when i want to find my static variables based off of a given stag pressure loss
+I am using equations E2 and E3
+From what i can tell because my Stag pressure is decreasing it drives my mach number up
+so instead of having a lower mach number it gets spiked up a ton 

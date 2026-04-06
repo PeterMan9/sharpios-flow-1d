@@ -1,6 +1,4 @@
-.venv/
-ct-env/
-ct-env312/
+CFD_venv/
 __pycache__/
 *.pyc
 *.pyo

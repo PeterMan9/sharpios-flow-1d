@@ -17,6 +17,12 @@ f_darcy = 0.01
 Cf = f_darcy/4 #skin friction factor
 gamma0 = 1.4
 
+#initial conditions for preburner inlet - will be solved/updated from the first solve function
+mdot = None
+Vinj = None 
+
+
+
 numSteps = 2e5
 dx = L/numSteps
 xList = np.arange(0, L + dx, dx)
@@ -25,15 +31,13 @@ xList = np.arange(0, L + dx, dx)
 # GEOMETRY
 ############################
 
-# region Geometry and area Functions
+
 
 r0 = 0.0127 #m
 D0 = 2 * r0 #m
 A0 = np.pi * r0**2 #m^2
 Astar = A0/25 #m^2
 rStar = np.sqrt(Astar/np.pi) #m
-
-
 
 def Area(x):
     x1 = 0.75 * L
@@ -80,10 +84,6 @@ def dAdx(x):
         dadx = 0
     return dadx
 
-
-# endregion
-
-
 def mNum(v,a): #mach number 
     M = v/a
     return M
@@ -105,7 +105,7 @@ x_s = 0
 def dHtdx(x):#dht/dx profile - quadtratic Ht
     return (qtotal/L) * (x - x_s)
 
-#region Nasa Polynomials
+# Nasa Polynomials
 
 def CpNasa(T): #solving variable Cp with NASA polynomials for N2 
     return (0.02926640*10**2 + 0.14879768E-02 * T - 0.05684760E-05 * T**2 + 0.10097038E-09 * T**3 - 0.06753351E-13 * T**4) * R
@@ -117,10 +117,9 @@ def gamma(T):#solving for gamma using
 def hTNasa(T): #solving for static enthalpy using NASA polynomials for N2
     return (0.02926640*10**2 + (0.14879768E-02 * T)/2 - (0.05684760E-05 * T**2)/3 + (0.10097038E-09 * T**3)/4 - (0.06753351E-13 * T**4)/5) * R * T
 
-#endregion
 
 
-#region Functions for solving ODEs -functions that solve for dV/dx and dP/dx - based off of 1d sharpios flow equations 
+# Functions for solving ODEs -functions that solve for dV/dx and dP/dx - based off of 1d sharpios flow equations 
 
 def dVdX (V,A,M,cp,T,dAdX,localdHtdx,mdot,DMDOTDX,Dh): #first 4 parts of sharpios 1d flow eqn converted to dV/dx
     gammA = gamma(T)
@@ -139,7 +138,6 @@ def dPdX (P,V,A,M,cp,T,DADX,localdHtdx,mdot,DMDOTDX,Dh): #first 4 parts of sharp
     term4 = (((4 * Cf * (P/Dh))) - (2 * ((Vinj * P)/(mdot * V)) * (DMDOTDX)))
     term5 = -(((2 * gammA * M**2 * (1 + ((gammA-1)/2) *M**2)*P)/((1-M**2)*mdot)) * (DMDOTDX))
     return term1 + term2 + (term3 * term4) + term5
-#endregion
 
 
 def pressureStagFunc(P,M,T):
@@ -147,12 +145,8 @@ def pressureStagFunc(P,M,T):
     Pstag = P * (1 + (gammA - 1)/2 * M**2)**(gammA/(gammA-1))
     return Pstag
 
-def pressureStagEntropyFunc(pstag1,entropy1,entropy2): #wrong for now, need to have it an equation that works with changing Tstag etc
-    pstag2 = pstag1 * np.exp(-(entropy2 - entropy1)/R)
-    return pstag2
 
-
-#region mixing CV inital conditions and mixing CV to preburner inlet functions 
+# mixing CV inital conditions and mixing CV to preburner inlet functions 
 
 
 #Defining cv for mixing 
@@ -175,18 +169,18 @@ A3 = 3 * A1 #m^2
 A_A = A1 * 2 #m^2
 
 
-P1 = 6*1e6 #Pa
-P2 = 6*1e6 #Pa
+P1 = 5*1e6 #Pa
+P2 = 5*1e6 #Pa
 P3 = 2*1e6 #Pa
 PA = P1 #Pa. Pa is equal to P1 and P2 because they are the same injector and they are connected to the same plenum.
+PB = P3 #Pa
 
+TA = 293 #K
+TA_2 = 293 #K
+TB = 293 #K
 
-TA = 300 #K
-TA_2 = 300 #K
-TB = 300 #K
-
-M1 = 0.5
-M2 = 0.5
+M1 = 0.4
+M2 = 0.4
 M3 = 0.6
 
 a1 = soS(TA)
@@ -216,11 +210,31 @@ A_CV_END = A0 #area at the end of the CV is the same as the area at the start of
 
 def E1_CV(ui,Ti):
     return ui - (mdotA/mdot_i) * uA - (mdotB/mdot_i) * uB - (mdotA * R * TA)/(mdot_i * uA) - (mdotB * R * TB)/(mdot_i * uB) + (R * Ti)/ui
+
 def E2_CV(ui,Ti):
     hi = hTNasa(Ti)
     hA = hTNasa(TA)
     hB = hTNasa(TB)
     return (hi + ui**2/2) - (mdotA/mdot_i) * (hA + uA**2/2) - (mdotB/mdot_i) * (hB + uB**2/2)
+
+def E3_CV(Pstagi, Tstagi, ui, Ti): #third cv equation check power point for indepth breakdown
+    part1 = (Pstagi/(R*Tstagi))     #pstag will be known because it is just the value that i get after decreasing my initially solved Pstag_i            
+    part2 = 1 + (gamma(Ti)-1)/2 * (ui**2/(gamma(Ti)*R*Ti))  #t stag will be known because it is solved from the Tstag at state 1 of the mixing CV
+    part3 = 1+(-1*gamma(Ti)/(gamma(Ti)-1))
+    return part1 * (part2)**(part3) * ui * A_CV_END - mdot_i
+
+def E4_CV(ui,Ti,Ttotal):
+    return hTNasa(Ti) + ui**2/2 - CpNasa(Ti) * Ttotal
+
+def Sgen_CV(Ti,Pi): #getting entropy generation from state 1 to state 2 in the CV
+   gas = ct.Solution('gri30.yaml')
+   gas.TPX = TA, PA, {'N2': 1.0}
+   sA = gas.entropy_mass
+   gas.TPX = TB, P3, {'N2': 1.0}
+   sB = gas.entropy_mass
+   gas.TPX = Ti, Pi, {'N2': 1.0}
+   si = gas.entropy_mass
+   return mdot_i * si - (mdotA * sA + mdotB * sB)
 
 def CV_toPreburner(u2,T2): #this is newton raphson for the CV it goes from state 1 (once gasses have mixed) to state 2 (preburner inlet) 
     numIters = 0        #cut down the system of equations to 2 equations and 2 unkowns so just solving till im under tolorence 
@@ -230,12 +244,10 @@ def CV_toPreburner(u2,T2): #this is newton raphson for the CV it goes from state
     E2 = E2_CV(u2,T2)
     E_vec = np.array([E1, E2])
 
-    print("_______________________________________________")
-    print("CV to Preburner ITERATION VALUES")
+  
 
     while(np.linalg.norm(E_vec, 2) >= tol):
         #numerical jacobian 
-
 
         deltaU = u2/1e8  #the delta or perturbation will be updating as u2 and T2 update to make sure its not too big or too small.
         deltaT = T2/1e8
@@ -257,14 +269,52 @@ def CV_toPreburner(u2,T2): #this is newton raphson for the CV it goes from state
         E2 = E2_CV(u2,T2)   #the method forward
         E_vec = np.array([E1, E2])   
 
-        print("velocity = ", u2, " m/s, Temperature = ", T2, " K")
-        print("E1 = ", E1, " E2 = ", E2)   
+        #print("velocity = ", u2, " m/s, Temperature = ", T2, " K")
+        #print("E1 = ", E1, " E2 = ", E2)   
 
         numIters += 1 #just counting num of iterations 
 
-    print("Converged in ", numIters, " iterations")
+    #print("Converged in ", numIters, " iterations")
+    #print("________________________________________________\n")
     return u2, T2
-#endregion
+
+def Preburner_ToCV(Pstag_pb,Tstag_pb,u2,T2):
+    numIters = 0
+    tol = 1e-8
+
+
+    E3 = E3_CV(Pstag_pb,Tstag_pb,u2,T2)
+    E4 = E4_CV(u2,T2,Tstag_pb)
+    E_vec = np.array([E4, E3])
+
+    while(np.linalg.norm(E_vec, 2) >= tol):
+        deltaU = max(abs(u2)*1e-6, 1e-6)
+        deltaT = max(abs(T2)*1e-6, 1e-6)
+
+        #partial derivatives for numerical jacobian
+        dE4du = (E4_CV(u2 + deltaU, T2, Tstag_pb) - E4)/deltaU
+        dE4dT = (E4_CV(u2, T2 + deltaT, Tstag_pb) - E4)/deltaT
+        dE3du = (E3_CV(Pstag_pb, Tstag_pb, u2 + deltaU, T2) - E3)/deltaU
+        dE3dT = (E3_CV(Pstag_pb, Tstag_pb, u2, T2 + deltaT) - E3)/deltaT
+
+        J = np.array([[dE4du, dE4dT], [dE3du, dE3dT]])
+        deltas = np.linalg.solve(J, -E_vec)
+
+        u2 += deltas[0]
+        T2 += deltas[1]
+
+        E4 = E4_CV(u2,T2,Tstag_pb)   #updating E4 and E3 values after updating u2 and T2 to check for convergence and to move
+        E3 = E3_CV(Pstag_pb, Tstag_pb, u2, T2)   
+        E_vec = np.array([E4, E3])   
+        numIters += 1
+       # print("velocity = ", u2, " m/s, Temperature = ", T2, " K")
+        # print("E4 = ", E4, " E3 = ", E3) 
+
+    #print("Converged in ", numIters, " iterations")
+    #print("________________________________________________\n")
+    return u2, T2
+
+
 
 #rk4 function
 def rk4Step(V,P, i): 
@@ -335,7 +385,7 @@ def rk4Step(V,P, i):
     return Vnext, Pnext
 
 
-#region Solving/Defining inital conditons for the preburner inlet - initializing arrays to store values etc
+# Solving/Defining inital conditons for the preburner inlet - initializing arrays to store values etc
 
 def P_rho_InitialValues(ui,Ti): #finding the rest of the initial values for the preburner inlet
     rho = mdot_i/(A_CV_END * ui)
@@ -346,188 +396,363 @@ def P_rho_InitialValues(ui,Ti): #finding the rest of the initial values for the 
 u_Guess_MixingCV = (uA * A_A + uB * A3)/A_CV_END
 T_Guess_MixingCV = (TA * A_A + TB * A3)/A_CV_END
 
-#calculating values at preburner inlet
-u_Preburner, T_Preburner = CV_toPreburner(u_Guess_MixingCV, T_Guess_MixingCV)
-P_preburner, rho_Preburner = P_rho_InitialValues(u_Preburner, T_Preburner)
-
-M_Preburner_Inlet = u_Preburner/np.sqrt(gamma(T_Preburner) * R * T_Preburner) #mach number at state 1 of injector to preburner CV
-Pstag_Preburner_Inlet = P_preburner * (1 + (gamma(T_Preburner) - 1)/2 * M_Preburner_Inlet**2)**(gamma(T_Preburner)/(gamma(T_Preburner)-1)) #stagnation pressure at inlet
+print("First Solve:")
 print("________________________________________________")
-print("Preburner Inlet Conditions")
-print("Velocity = ", u_Preburner, " m/s")
-print("Temperature = ", T_Preburner, " K")
-print("Pressure = ", P_preburner * 1e-6, " MPa")
-print("Mach Number = ", M_Preburner_Inlet)
-
-#arrays to store values
-temp = []
-temp.append(T_Preburner)
-
-velocities = []
-velocities.append(u_Preburner)
-
-pressure = []
-pressure.append(P_preburner)
-
-machNum = []
-machNum.append(M_Preburner_Inlet)
-
-density = []
-density.append(rho_Preburner)
-
-pressureStag = []
-pressureStag.append(Pstag_Preburner_Inlet)
-
-pressureStag_entropy = []
-pressureStag_entropy.append(Pstag_Preburner_Inlet)
 
 
-mdot = np.full(len(xList), mdot_i)
 
-mdotReconsturcted = []
-mdotReconsturcted.append(mdot_i)
 
-areaList = []
-areaList.append(Area(0)) #area at the inlet of the preburner
+#first solve function 
+def first_solve(u2_guess,T2_guess):
 
-dAdxList = []
-dAdxList.append(0)
+    global mdot,Vinj #making them global so that i can use them in rk4 and ode functions
+    #solving Mixing CV
+    #calculating values at preburner inlet
+    u_Preburner, T_Preburner = CV_toPreburner(u_Guess_MixingCV, T_Guess_MixingCV)
+    P_preburner, rho_Preburner = P_rho_InitialValues(u_Preburner, T_Preburner)
 
-entropy = []
+    M_Preburner_Inlet = u_Preburner/np.sqrt(gamma(T_Preburner) * R * T_Preburner) #mach number at state 1 of injector to preburner CV
+    Pstag_Preburner_Inlet = P_preburner * (1 + (gamma(T_Preburner) - 1)/2 * M_Preburner_Inlet**2)**(gamma(T_Preburner)/(gamma(T_Preburner)-1)) #stagnation pressure at inlet
+       #printing I.C. for preburner to inlet 
+    print("Preburner Inlet Conditions")
+    print("Velocity = ", u_Preburner, " m/s")
+    print("Temperature = ", T_Preburner, " K")
+    print("Pressure = ", P_preburner * 1e-6, " MPa")
+    print("Mach Number = ", M_Preburner_Inlet)
+    print("________________________________________________") 
 
-gas = ct.Solution('gri30.yaml')
-gas.TPX = T_Preburner, P_preburner, {'N2': 1.0}
-sInitial = gas.entropy_mass
-entropy.append(sInitial)
+    temp = [T_Preburner]                # creating fresh arrays in function 
+    velocities = [u_Preburner]
+    pressure = [P_preburner]
+    machNum = [M_Preburner_Inlet]
+    density = [rho_Preburner]
+    pressureStag = [Pstag_Preburner_Inlet]
+    areaList = [Area(0)]
+    dAdxList = [0.0]
 
-#endregion
+    gas = ct.Solution('gri30.yaml')
+    gas.TPX = T_Preburner, P_preburner, {'N2': 1.0}
+    sInitial = gas.entropy_mass
+    entropy = [sInitial]
 
-#region Injector 
+    mdot = np.full(len(xList), mdot_i)
+    mdotReconsturcted = [] #recontruction array to check if calcs are correct 
+    mdotReconsturcted.append(mdot_i) 
 
-Vinj = 250 # m/s speed of N2 being injected (alr converted to x direction)
-Dinj = 0.003175 #m Injector diameter
-Ainj = np.pi * (Dinj/2)**2 #m^2 
-injMdot = rho_Preburner * Vinj * Ainj #kg/s
+   # Creating Injector Array and Adding Mass Flow from Injector to global mdot array 
+    Vinj = 250 # m/s speed of N2 being injected (alr converted to x direction)
+    Dinj = 0.003175 #m Injector diameter
+    Ainj = np.pi * (Dinj/2)**2 #m^2 
+    injMdot = rho_Preburner * Vinj * Ainj #kg/s 
 
-x_injLocation = 0.15 * L #m
-injIndex = int(x_injLocation/dx) #index of the center of the injector 
-injIndexRange = int((Dinj/2)/dx) #range is +- so this is only half of total inj diameter
-inj_array = np.zeros(len(xList)) #array to hold injector locations (0 means no injector 1 means injector, 2 means post injector)
+    x_injLocation = 0.15 * L #m
+    injIndex = int(x_injLocation/dx) #index of the center of the injector 
+    injIndexRange = int((Dinj/2)/dx) #range is +- so this is only half of total inj diameter
+    inj_array = np.zeros(len(xList)) #array to hold injector locations (0 means no injector 1 means injector, 2 means post injector)
 
-startInj = max(0, int(injIndex - injIndexRange)) #start index of injector
-endInj = min(len(xList)-1, int(injIndex + injIndexRange)) #end index of injector
-inj_array[startInj:endInj+1] = 1 #mark injector location, +1 to include end index
-inj_array[endInj+1:] = 2    #mark post injector locations +1 to start 1 after that end index
+    startInj = max(0, int(injIndex - injIndexRange)) #start index of injector
+    endInj = min(len(xList)-1, int(injIndex + injIndexRange)) #end index of injector
+    inj_array[startInj:endInj+1] = 1 #mark injector location, +1 to include end index
+    inj_array[endInj+1:] = 2    #mark post injector locations +1 to start 1 after that end index #going to go over wtf this means 
 
-mdot[startInj:endInj+1] = mdot_i + injMdot #add injector mass flow to main flow at injector location
-mdot[endInj+1:] = mdot_i + injMdot #post injector mass flow
+    mdot[startInj:endInj+1] = mdot_i + injMdot #add injector mass flow to main flow at injector location
+    mdot[endInj+1:] = mdot_i + injMdot #post injector mass flow
 
-#endregion
+        #solving flow through Preburner
+    for i in range(1, len(xList)): #actual for loop for solving everything. 
+        xCurrent = xList[i]      
+        mdotlocal = mdot[i]
+  
+        localAreaCurrent = Area(xCurrent)
+        areaList.append(localAreaCurrent)
+        dAdXCurrent = dAdx(xCurrent)
+        dAdxList.append(dAdXCurrent)
 
-#solving flow through Preburner
-for i in range(1, len(xList)): #actual for loop for solving everything. only updating value vectors (velocity, pressure, rho etc)  
-    xCurrent = xList[i]        # after everything in current state is solved to avoid mess ups
-    localAreaCurrent = Area(xCurrent)
-    areaList.append(localAreaCurrent)
-    dAdXCurrent = dAdx(xCurrent)
-    dAdxList.append(dAdXCurrent)
+        Vbefore = velocities[i-1]
+        Pbefore = pressure[i-1]
+        VCurrent, PCurrent = rk4Step(Vbefore,Pbefore, i)
 
-    Vbefore = velocities[i-1]
-    Pbefore = pressure[i-1]
-    VCurrent, PCurrent = rk4Step(Vbefore,Pbefore, i)
-    mdotlocal = mdot[i] #using local/current mdot to get rho to get T and etc
-    rhoCurrent = mdotlocal/(Area(xList[i]) * VCurrent) 
-    mdotReconsturcted.append(rhoCurrent * VCurrent * localAreaCurrent)
-    velocities.append(VCurrent)
-    pressure.append(PCurrent)
-    TCurrent = PCurrent/(rhoCurrent * R)
-    density.append(rhoCurrent)
-    temp.append(TCurrent)
-    aCurrent = soS(TCurrent)
-    MCurrent = mNum(VCurrent,aCurrent)
-    machNum.append(MCurrent)
-    pressureStag.append(pressureStagFunc(PCurrent,MCurrent,TCurrent))
-    gas.TP = TCurrent, PCurrent
-    sCurrent = gas.entropy_mass
-    entropy.append(sCurrent)
-    pressureStag_entropy.append(pressureStagEntropyFunc(pressureStag_entropy[i-1],entropy[i-1],entropy[i]))
+        velocities.append(VCurrent)
+        pressure.append(PCurrent)
+
+        rhoCurrent = mdotlocal/(Area(xList[i]) * VCurrent) 
+        density.append(rhoCurrent)
+
+        TCurrent = PCurrent/(rhoCurrent * R)
+        temp.append(TCurrent)
+
+         #using local/current mdot to get rho to get T and etc
+        mdotReconsturcted.append(rhoCurrent * VCurrent * localAreaCurrent)
+
+        aCurrent = soS(TCurrent)
+        MCurrent = mNum(VCurrent,aCurrent)
+        machNum.append(MCurrent)
+
+        pressureStag.append(pressureStagFunc(PCurrent,MCurrent,TCurrent))
+
+        gas.TP = TCurrent, PCurrent
+        sCurrent = gas.entropy_mass
+        entropy.append(sCurrent)
+        
+        if MCurrent >= 1:
+            print("Flow is choked at x = ", xCurrent)
+            break
+
+    #converting to np arrays
+    V_List = np.array(velocities)
+    P_List = np.array(pressure)
+    T_List = np.array(temp)
+    rho_List = np.array(density)
+    M_List = np.array(machNum)
+    pStag_List = np.array(pressureStag)
+
+    x_used_List = np.array(xList[:len(V_List)])
+    Area_List = np.array(areaList)
+    dAdx_List = np.array(dAdxList)
+
+    mdot_List = np.array(mdot[:len(V_List)])
+    mdotReconsturcted_List = np.array(mdotReconsturcted)
+    entropy_List = np.array(entropy)
+
+
+    print("Final Mach Number:", M_List[-1])
+
+    return {
+        "velocity": V_List,
+        "pressure": P_List,
+        "temperature": T_List,
+        "density": rho_List,
+        "mach_number": M_List,
+        "stagnation_pressure": pStag_List,
+        "x": x_used_List,
+        "area": Area_List,
+        "dAdx": dAdx_List,
+        "mdot": mdot_List,
+        "mdot_reconstructed": mdotReconsturcted_List,
+        "entropy": entropy_List,
+        "xChocked": xCurrent,
+        "mdot Injector": injMdot    
+    }
+
+
+#results from first solve
+results = first_solve(u_Guess_MixingCV, T_Guess_MixingCV)
+
+x= results["x"]
+velocity_List = results["velocity"]
+rho_List = results["density"]
+pressure_List = results["pressure"]
+temperature_List = results["temperature"]
+density_List = results["density"]
+machNum_List = results["mach_number"]
+mdot_List = results["mdot"]
+mdotReconsturcted_List = results["mdot_reconstructed"]
+entropy_List = results["entropy"]
+stagnation_pressure = results["stagnation_pressure"]
+print("Stagnation Pressure at Preburner Inlet from first solve = ", stagnation_pressure[0] * 1e-6, " MPa")
+print("Gamma at Preburner Inlet from first solve = ", gamma(temperature_List[0]), "\n\n")
+
+injectorMdot_1stSolve = results["mdot Injector"]
+
+#second solve
+stagnation_pressure_inlet = stagnation_pressure[0] * 0.8 #assuming 20% loss from mixing
+Tstag_inlet = temperature_List[0] * (1 + (gamma(temperature_List[0]) - 1)/2 * machNum_List[0]**2) #isentropic relation to get Tstag at inlet
+velocity_Inlet_guess = velocity_List[0]
+temperature_Inlet_guess = temperature_List[0]
+
+print("Second Solve:")
+print("________________________________________________\n")
+
+def second_solve(pstag_inlet, Tstag_inlet, u2_guess, T2_guess, injMdot):
+    global mdot,Vinj #making them global so that i can use them in rk4 and ode functions
+    
+    u_Preburner, T_Preburner = Preburner_ToCV(pstag_inlet, Tstag_inlet, u2_guess, T2_guess)
+    P_preburner, rho_Preburner = P_rho_InitialValues(u_Preburner, T_Preburner)
+
+    M_Preburner_Inlet = u_Preburner/np.sqrt(gamma(T_Preburner) * R * T_Preburner) #mach number at state 1 of injector to preburner CV
+    Pstag_Preburner_Inlet = pstag_inlet
+
+          #printing I.C. for preburner to inlet 
+    print("Preburner Inlet Conditions from second solve")
+    print("Velocity = ", u_Preburner, " m/s")
+    print("Temperature = ", T_Preburner, " K")
+    print("Pressure = ", P_preburner * 1e-6, " MPa")
+    print("Mach Number = ", M_Preburner_Inlet)
+    print("________________________________________________") 
+
+    temp = [T_Preburner]                # creating fresh arrays in function 
+    velocities = [u_Preburner]
+    pressure = [P_preburner]
+    machNum = [M_Preburner_Inlet]
+    density = [rho_Preburner]
+    pressureStag = [Pstag_Preburner_Inlet]
+    areaList = [Area(0)]
+    dAdxList = [0.0]
+
+    gas = ct.Solution('gri30.yaml')
+    gas.TPX = T_Preburner, P_preburner, {'N2': 1.0}
+    sInitial = gas.entropy_mass
+    entropy = [sInitial]
+
+    mdot = np.full(len(xList), mdot_i)
+    mdotReconsturcted = [] #recontruction array to check if calcs are correct 
+    mdotReconsturcted.append(mdot_i) 
+
+   # Creating Injector Array and Adding Mass Flow from Injector to global mdot array 
+    Vinj = 250 # m/s speed of N2 being injected (alr converted to x direction)
+    Dinj = 0.003175 #m Injector diameter
+    Ainj = np.pi * (Dinj/2)**2 #m^2 
+    
+
+    x_injLocation = 0.15 * L #m
+    injIndex = int(x_injLocation/dx) #index of the center of the injector 
+    injIndexRange = int((Dinj/2)/dx) #range is +- so this is only half of total inj diameter
+    inj_array = np.zeros(len(xList)) #array to hold injector locations (0 means no injector 1 means injector, 2 means post injector)
+
+    startInj = max(0, int(injIndex - injIndexRange)) #start index of injector
+    endInj = min(len(xList)-1, int(injIndex + injIndexRange)) #end index of injector
+    inj_array[startInj:endInj+1] = 1 #mark injector location, +1 to include end index
+    inj_array[endInj+1:] = 2    #mark post injector locations +1 to start 1 after that end index #going to go over wtf this means 
+
+    mdot[startInj:endInj+1] = mdot_i + injMdot #add injector mass flow to main flow at injector location
+    mdot[endInj+1:] = mdot_i + injMdot #post injector mass flow
+
+        #solving flow through Preburner
+    for i in range(1, len(xList)): #actual for loop for solving everything. 
+        xCurrent = xList[i]      
+        mdotlocal = mdot[i]
+  
+        localAreaCurrent = Area(xCurrent)
+        areaList.append(localAreaCurrent)
+        dAdXCurrent = dAdx(xCurrent)
+        dAdxList.append(dAdXCurrent)
+
+        Vbefore = velocities[i-1]
+        Pbefore = pressure[i-1]
+        VCurrent, PCurrent = rk4Step(Vbefore,Pbefore, i)
+
+        velocities.append(VCurrent)
+        pressure.append(PCurrent)
+
+        rhoCurrent = mdotlocal/(Area(xList[i]) * VCurrent) 
+        density.append(rhoCurrent)
+
+        TCurrent = PCurrent/(rhoCurrent * R)
+        temp.append(TCurrent)
+
+         #using local/current mdot to get rho to get T and etc
+        mdotReconsturcted.append(rhoCurrent * VCurrent * localAreaCurrent)
+
+        aCurrent = soS(TCurrent)
+        MCurrent = mNum(VCurrent,aCurrent)
+        machNum.append(MCurrent)
+
+        pressureStag.append(pressureStagFunc(PCurrent,MCurrent,TCurrent))
+
+        gas.TP = TCurrent, PCurrent
+        sCurrent = gas.entropy_mass
+        entropy.append(sCurrent)
+        
+        if MCurrent >= 1:
+            print("Flow for 2nd solve is choked at x = ", xCurrent)
+            break
+
+    #converting to np arrays
+    V_List = np.array(velocities)
+    P_List = np.array(pressure)
+    T_List = np.array(temp)
+    rho_List = np.array(density)
+    M_List = np.array(machNum)
+    pStag_List = np.array(pressureStag)
+
+    x_used_List = np.array(xList[:len(V_List)])
+    Area_List = np.array(areaList)
+    dAdx_List = np.array(dAdxList)
+
+    mdot_List = np.array(mdot[:len(x_used_List)])
+    mdotReconsturcted_List = np.array(mdotReconsturcted)
+    entropy_List = np.array(entropy)
+
+
+    print("Final Mach Number:", M_List[-1])
+
+    return {
+        "velocity": V_List,
+        "pressure": P_List,
+        "temperature": T_List,
+        "density": rho_List,
+        "mach_number": M_List,
+        "stagnation_pressure": pStag_List,
+        "x": x_used_List,
+        "area": Area_List,
+        "dAdx": dAdx_List,
+        "mdot": mdot_List,
+        "mdot_reconstructed": mdotReconsturcted_List,
+        "entropy": entropy_List,
+        "xChocked": xCurrent
+    }
+
+
+#results second solve
+results_second_solve = second_solve(stagnation_pressure_inlet, Tstag_inlet, velocity_Inlet_guess, temperature_Inlet_guess, injectorMdot_1stSolve)
+x2= results_second_solve["x"]
+mdot_2nd_solve = results_second_solve["mdot"]
+velocity_List_2nd_solve = results_second_solve["velocity"]
+temperature_List_2nd_solve = results_second_solve["temperature"]
+pressure_List_2nd_solve = results_second_solve["pressure"]
+entropy_List_2nd_solve = results_second_solve["entropy"]
+stagnation_pressure_2nd_solve = results_second_solve["stagnation_pressure"]
+
+print("Stagnation Pressure at Preburner Inlet from second solve = ", stagnation_pressure_2nd_solve[0] * 1e-6, " MPa")
+print("Gamma at Preburner Inlet from second solve = ", gamma(temperature_List_2nd_solve[0]), "\n\n")
+
+
+
 
     
-    if machNum[i] >= 1:
-        print("Flow is choked at x = ", xCurrent)
-        break
-
-
-#converting list to numpy arrays for plt
-V_List = np.array(velocities)
-P_List = np.array(pressure)
-T_List = np.array(temp)
-rho_List = np.array(density)
-M_List = np.array(machNum)
-pStag_List = np.array(pressureStag)
-pStagEntropyFunc_List = np.array(pressureStag_entropy)
-
-
-x_List = np.array(xList[:len(V_List)])
-Area_List = np.array(areaList)
-dAdx_List = np.array(dAdxList)
-
-mdot_List = np.array(mdot)
-mdotReconsturcted_List = np.array(mdotReconsturcted)
-entropy_List = np.array(entropy)
-
-
-
-print("Final Mach Number:", M_List[-1])
 
 
 #plotting results 
 '''
+
+
 plt.figure() #Plotting mdot residuals as a way to debug mdot and make sure my V, rho etc calc correctly
-plt.plot(x_List,mdotReconsturcted_List[:len(x_List)] - mdot_List[:len(x_List)])
+plt.plot(x,mdotReconsturcted_List[:len(x)] - mdot_List[:len(x)])
 plt.xlabel('x (m)')
 plt.ylabel('Mdot (kg/s)')
 plt.title('Plotting Residuals for mDot')
 plt.grid()
 
-plt.figure()
-plt.plot(x_List, pStag_List)
-plt.xlabel('x (m)')
-plt.ylabel('Pressure Stagnation (Pa)')
-plt.title('Plotting Pressure Stagnation')
-plt.grid()
+
+
+
 
 plt.figure()
-plt.plot(x_List, entropy_List)
+plt.plot(x2, pressure_List_2nd_solve)
 plt.xlabel('x (m)')
-plt.ylabel('Entropy (J/kg/K)')
-plt.title('Plotting Entropy')
+plt.ylabel('Pressure 2nd Solve(Pa)')
+plt.title('Plotting Pressure')
 plt.grid()
 
-plt.figure()
-plt.plot(x_List, Area_List)
-plt.xlabel('x (m)')
-plt.ylabel('Area (m^2)')
-plt.title('Plotting Area')
-plt.grid()
-
-plt.figure()
-plt.plot(x_List, dAdx_List)
-plt.xlabel('x (m)')
-plt.ylabel('dA/dx')
-plt.title('Plotting dA/dx')
-plt.grid()
 '''
 
 plt.figure()
-plt.plot(x_List, entropy_List)
+plt.plot(x,stagnation_pressure, label='1st Solve')
+plt.plot(x2, stagnation_pressure_2nd_solve, label='2nd Solve')
 plt.xlabel('x (m)')
-plt.ylabel('Entropy (J/kg/K)')
+plt.ylabel('Pressure Stagnation (Pa)')
+plt.title('Plotting Pressure Stagnation')
+plt.legend()
+plt.grid()
+
+
+plt.figure()
+plt.plot(x,entropy_List, label='1st Solve')
+plt.plot(x2, entropy_List_2nd_solve, label='2nd Solve')
+plt.xlabel('x (m)')
+plt.ylabel('Entropy 2nd Solve(J/kg/K)')
 plt.title('Plotting Entropy')
+plt.legend()
 plt.grid()
 
 plt.show()
-
-
-
-
