@@ -1,0 +1,60 @@
+Meeting 4/13/2026 
+
+newton raphson for 
+to find deriv of error with respect to stagnation pressure loss 
+
+just same FDM 
+
+
+bisection + newton method 
+set up bisection bounds
+and try to take a newton step 
+and if my newton step is outside of the bounds then take a bisection step instead and keep doing that until i converge to a solution
+
+to start with just do bisection method and then try newton 
+
+
+next option 
+we format it as a model 
+or 
+we have this coeff
+we generate some data for this coeff and then we try to find the coeff and etc using baysian calibration and etc 
+
+
+see if we can get a work around on 
+the work i will be doing will be parallel in the class will be parallel 
+
+think about thinking it interms of Cd 
+
+unidentifiable parameter - many ways to change P,T,M
+all we measure is wall temp 
+we dont know from measurments alone what causes pressure change 
+coeff scale diff with diff values 
+so models become non transferable
+who goal by describing a model for each component so that we can determine why the pressure change is due to a coeff 
+and we can determine what coeff is more likely 
+
+we need preliminary results 
+training on hyper react 
+baysian calibration 
+
+aiaa abstract should be preliminary results and what we can do next 
+so we need to show preliminary results 
+
+def doable 
+couple days to write couple days to do edits 
+
+start looking at bayesian calibration and how to do it in python
+generate a curve 
+pick different inital guesses and find the coeff for each guess 
+
+take a look at paper on bayesian calibration 
+
+using python 
+pick a mcmc (montecarlo marcov chain) - baysian calibration method
+ 
+
+so look at mcmc bayesian primers too 
+
+we show that we have this unidentafiablility 
+

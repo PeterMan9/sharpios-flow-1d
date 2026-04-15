@@ -89,8 +89,7 @@ def mNum(v,a): #mach number
     return M
 
 def soS(T): #solving for a using variable gamma and Cp 
-    gammA = (CpNasa(T)/(CpNasa(T) - R))
-    a = np.sqrt(gammA * R * T)
+    a = np.sqrt(gamma(T) * R * T)
     return a
 
 
@@ -191,7 +190,11 @@ uA = M1 * a1
 uA_2 = M2 * a2
 uB = M3 * a3
 
+TstagA = TA * (1 + (gamma(TA) - 1)/2 * M1**2)
+TstagB = TB * (1 + (gamma(TB) - 1)/2 * M3**2)
 
+PstagA = PA * (1 + (gamma(TA) - 1)/2 * M1**2)**(gamma(TA)/(gamma(TA)-1))
+PstagB = PB * (1 + (gamma(TB) - 1)/2 * M3**2)**(gamma(TB)/(gamma(TB)-1))
 
 rho1 = P1/(R*TA) #will have to define R for diff species etc - but for now they are all the same
 rho2 = P2/(R*TA_2)
@@ -208,43 +211,41 @@ mdot_i = mdotA + mdotB
 A_CV_END = A0 #area at the end of the CV is the same as the area at the start of the preburner inlet.
 
 
-def E1_CV(ui,Ti):
+def E1_CV(ui,Ti,uA,uB,TA,TB):
     return ui - (mdotA/mdot_i) * uA - (mdotB/mdot_i) * uB - (mdotA * R * TA)/(mdot_i * uA) - (mdotB * R * TB)/(mdot_i * uB) + (R * Ti)/ui
 
-def E2_CV(ui,Ti):
+def E2_CV(ui,Ti,uA,uB,TA,TB):
     hi = hTNasa(Ti)
     hA = hTNasa(TA)
     hB = hTNasa(TB)
     return (hi + ui**2/2) - (mdotA/mdot_i) * (hA + uA**2/2) - (mdotB/mdot_i) * (hB + uB**2/2)
 
-def E3_CV(Pstagi, Tstagi, ui, Ti): #third cv equation check power point for indepth breakdown
-    part1 = (Pstagi/(R*Tstagi))     #pstag will be known because it is just the value that i get after decreasing my initially solved Pstag_i            
-    part2 = 1 + (gamma(Ti)-1)/2 * (ui**2/(gamma(Ti)*R*Ti))  #t stag will be known because it is solved from the Tstag at state 1 of the mixing CV
-    part3 = 1+(-1*gamma(Ti)/(gamma(Ti)-1))
-    return part1 * (part2)**(part3) * ui * A_CV_END - mdot_i
+def E3_InjA_CV(PstagA_2, uA_2, TA_2): #third cv equation check power point for indepth breakdown
+    part1 = PstagA_2/(R * TstagA)
+    part2 = 1 + (gamma(TA_2) - 1)/2 * ((uA_2/soS(TA_2))**2)
+    part3 = (1 - 1*(gamma(TA_2)/(gamma(TA_2)-1)))
+    return part1 * part2**part3 - uA_2 * A_A - mdotA
 
-def E4_CV(ui,Ti,Ttotal):
-    return hTNasa(Ti) + ui**2/2 - CpNasa(Ti) * Ttotal
+def E4_InjB_CV(PstagB_2, uB_2, TB_2): #third cv equation check power point for indepth breakdown
+    part1 = PstagB_2/(R * TstagB)
+    part2 = 1 + (gamma(TB_2) - 1)/2 * ((uB_2/soS(TB_2))**2)
+    part3 = (1 - 1*(gamma(TB_2)/(gamma(TB_2)-1)))
+    return part1 * part2**part3 - uB_2 * A3 - mdotB
 
-def Sgen_CV(Ti,Pi): #getting entropy generation from state 1 to state 2 in the CV
-   gas = ct.Solution('gri30.yaml')
-   gas.TPX = TA, PA, {'N2': 1.0}
-   sA = gas.entropy_mass
-   gas.TPX = TB, P3, {'N2': 1.0}
-   sB = gas.entropy_mass
-   gas.TPX = Ti, Pi, {'N2': 1.0}
-   si = gas.entropy_mass
-   return mdot_i * si - (mdotA * sA + mdotB * sB)
+def E5_InjA_CV(TA_2,uA_2):
+    return TA_2 * (1 + (gamma(TA_2) - 1)/2 * (uA_2/soS(TA_2))**2) - TstagA
 
-def CV_toPreburner(u2,T2): #this is newton raphson for the CV it goes from state 1 (once gasses have mixed) to state 2 (preburner inlet) 
+def E6_InjB_CV(TB_2,uB_2):
+    return TB_2 * (1 + (gamma(TB_2) - 1)/2 * (uB_2/soS(TB_2))**2) - TstagB
+
+
+def CV_toPreburner(u2,T2,uA,uB,TA,TB): #this is newton raphson for the CV it goes from state 1 (once gasses have mixed) to state 2 (preburner inlet) 
     numIters = 0        #cut down the system of equations to 2 equations and 2 unkowns so just solving till im under tolorence 
     tol = 1e-8
 
-    E1 = E1_CV(u2,T2)
-    E2 = E2_CV(u2,T2)
+    E1 = E1_CV(u2,T2,uA,uB,TA,TB)
+    E2 = E2_CV(u2,T2,uA,uB,TA,TB)
     E_vec = np.array([E1, E2])
-
-  
 
     while(np.linalg.norm(E_vec, 2) >= tol):
         #numerical jacobian 
@@ -253,10 +254,10 @@ def CV_toPreburner(u2,T2): #this is newton raphson for the CV it goes from state
         deltaT = T2/1e8
 
 
-        dE1du = (E1_CV(u2 + deltaU, T2) - E1)/deltaU
-        dE1dT = (E1_CV(u2, T2 + deltaT) - E1)/deltaT
-        dE2du = (E2_CV(u2 + deltaU, T2) - E2)/deltaU
-        dE2dT = (E2_CV(u2, T2 + deltaT) - E2)/deltaT
+        dE1du = (E1_CV(u2 + deltaU, T2, uA, uB, TA, TB) - E1)/deltaU
+        dE1dT = (E1_CV(u2, T2 + deltaT, uA, uB, TA, TB) - E1)/deltaT
+        dE2du = (E2_CV(u2 + deltaU, T2, uA, uB, TA, TB) - E2)/deltaU
+        dE2dT = (E2_CV(u2, T2 + deltaT, uA, uB, TA, TB) - E2)/deltaT
 
         J = np.array([[dE1du, dE1dT], [dE2du, dE2dT]])
         
@@ -265,8 +266,8 @@ def CV_toPreburner(u2,T2): #this is newton raphson for the CV it goes from state
         u2 += deltas[0]
         T2 += deltas[1]
 
-        E1 = E1_CV(u2,T2)   #updating E1 and E2 values after updating u2 and T2 to check for convergence and to move
-        E2 = E2_CV(u2,T2)   #the method forward
+        E1 = E1_CV(u2,T2,uA,uB,TA,TB)   #updating E1 and E2 values after updating u2 and T2 to check for convergence and to move
+        E2 = E2_CV(u2,T2,uA,uB,TA,TB)   #the method forward
         E_vec = np.array([E1, E2])   
 
         #print("velocity = ", u2, " m/s, Temperature = ", T2, " K")
@@ -278,43 +279,77 @@ def CV_toPreburner(u2,T2): #this is newton raphson for the CV it goes from state
     #print("________________________________________________\n")
     return u2, T2
 
-def Preburner_ToCV(Pstag_pb,Tstag_pb,u2,T2):
+def InjA_Loss_CV(Pstag_A2,uA_2, TA_2):
     numIters = 0
     tol = 1e-8
 
 
-    E3 = E3_CV(Pstag_pb,Tstag_pb,u2,T2)
-    E4 = E4_CV(u2,T2,Tstag_pb)
-    E_vec = np.array([E4, E3])
+    E3 = E3_InjA_CV(Pstag_A2,uA_2, TA_2)
+    E5 = E5_InjA_CV(TA_2,uA_2)
+    E_vec = np.array([E5, E3])
 
     while(np.linalg.norm(E_vec, 2) >= tol):
-        deltaU = max(abs(u2)*1e-6, 1e-6)
-        deltaT = max(abs(T2)*1e-6, 1e-6)
+        deltaU = max(abs(uA_2)*1e-6, 1e-6)
+        deltaT = max(abs(TA_2)*1e-6, 1e-6)
 
         #partial derivatives for numerical jacobian
-        dE4du = (E4_CV(u2 + deltaU, T2, Tstag_pb) - E4)/deltaU
-        dE4dT = (E4_CV(u2, T2 + deltaT, Tstag_pb) - E4)/deltaT
-        dE3du = (E3_CV(Pstag_pb, Tstag_pb, u2 + deltaU, T2) - E3)/deltaU
-        dE3dT = (E3_CV(Pstag_pb, Tstag_pb, u2, T2 + deltaT) - E3)/deltaT
+        dE5du = (E5_InjA_CV(TA_2, uA_2+ deltaU) - E5)/deltaU
+        dE5dT = (E5_InjA_CV(TA_2 + deltaT, uA_2) - E5)/deltaT
+        dE3du = (E3_InjA_CV(Pstag_A2, uA_2 + deltaU, TA_2) - E3)/deltaU
+        dE3dT = (E3_InjA_CV(Pstag_A2, uA_2, TA_2 + deltaT) - E3)/deltaT
 
-        J = np.array([[dE4du, dE4dT], [dE3du, dE3dT]])
+        J = np.array([[dE5du, dE5dT], [dE3du, dE3dT]])
         deltas = np.linalg.solve(J, -E_vec)
 
-        u2 += deltas[0]
-        T2 += deltas[1]
+        uA_2 += deltas[0]
+        TA_2 += deltas[1]
 
-        E4 = E4_CV(u2,T2,Tstag_pb)   #updating E4 and E3 values after updating u2 and T2 to check for convergence and to move
-        E3 = E3_CV(Pstag_pb, Tstag_pb, u2, T2)   
-        E_vec = np.array([E4, E3])   
+        E5 = E5_InjA_CV(TA_2, uA_2)   #updating E5 and E3 values after updating u2 and T2 to check for convergence and to move
+        E3 = E3_InjA_CV(Pstag_A2, uA_2, TA_2)   
+        E_vec = np.array([E5, E3])   
         numIters += 1
        # print("velocity = ", u2, " m/s, Temperature = ", T2, " K")
-        # print("E4 = ", E4, " E3 = ", E3) 
+        # print("E5 = ", E5, " E3 = ", E3) 
 
     #print("Converged in ", numIters, " iterations")
     #print("________________________________________________\n")
-    return u2, T2
+    return uA_2, TA_2
+
+def InjB_Loss_CV(Pstag_B2,uB_2, TB_2):
+    numIters = 0
+    tol = 1e-8
 
 
+    E4 = E4_InjB_CV(Pstag_B2,uB_2, TB_2)
+    E6 = E6_InjB_CV(TB_2,uB_2)
+    E_vec = np.array([E6, E4])
+
+    while(np.linalg.norm(E_vec, 2) >= tol):
+        deltaU = max(abs(uB_2)*1e-6, 1e-6)
+        deltaT = max(abs(TB_2)*1e-6, 1e-6)
+
+        #partial derivatives for numerical jacobian
+        dE6du = (E6_InjB_CV(TB_2, uB_2 + deltaU) - E6)/deltaU
+        dE6dT = (E6_InjB_CV(TB_2 + deltaT, uB_2) - E6)/deltaT
+        dE4du = (E4_InjB_CV(Pstag_B2, uB_2 + deltaU, TB_2) - E4)/deltaU
+        dE4dT = (E4_InjB_CV(Pstag_B2, uB_2, TB_2 + deltaT) - E4)/deltaT
+
+        J = np.array([[dE6du, dE6dT], [dE4du, dE4dT]])
+        deltas = np.linalg.solve(J, -E_vec)
+
+        uB_2 += deltas[0]
+        TB_2 += deltas[1]
+
+        E6 = E6_InjB_CV(TB_2, uB_2)   #updating E6 and E4 values after updating uB_2 and B_2 to check for convergence and to move
+        E4 = E4_InjB_CV(Pstag_B2, uB_2, TB_2)   
+        E_vec = np.array([E6, E4])   
+        numIters += 1
+       # print("velocity = ", u2, " m/s, Temperature = ", T2, " K")
+        # print("E6 = ", E6, " E4 = ", E4) 
+
+    #print("Converged in ", numIters, " iterations")
+    #print("________________________________________________\n")
+    return uB_2, TB_2
 
 #rk4 function
 def rk4Step(V,P, i): 
@@ -408,7 +443,7 @@ def first_solve(u2_guess,T2_guess):
     global mdot,Vinj #making them global so that i can use them in rk4 and ode functions
     #solving Mixing CV
     #calculating values at preburner inlet
-    u_Preburner, T_Preburner = CV_toPreburner(u_Guess_MixingCV, T_Guess_MixingCV)
+    u_Preburner, T_Preburner = CV_toPreburner(u2_guess, T2_guess,uA,uB,TA,TB)
     P_preburner, rho_Preburner = P_rho_InitialValues(u_Preburner, T_Preburner)
 
     M_Preburner_Inlet = u_Preburner/np.sqrt(gamma(T_Preburner) * R * T_Preburner) #mach number at state 1 of injector to preburner CV
@@ -555,42 +590,45 @@ print("Gamma at Preburner Inlet from first solve = ", gamma(temperature_List[0])
 injectorMdot_1stSolve = results["mdot Injector"]
 
 #second solve
-stagnation_pressure_inlet = stagnation_pressure[0] * 0.8 #assuming 20% loss from mixing
+stagnation_pressure_inlet = stagnation_pressure[0] * 0.9 #assuming 10% loss from mixing
 Tstag_inlet = temperature_List[0] * (1 + (gamma(temperature_List[0]) - 1)/2 * machNum_List[0]**2) #isentropic relation to get Tstag at inlet
-velocity_Inlet_guess = velocity_List[0]
-temperature_Inlet_guess = temperature_List[0]
+
+
 
 print("Second Solve:")
 print("________________________________________________\n")
 
-def second_solve(pstag_inlet, Tstag_inlet, u2_guess, T2_guess, injMdot):
+def second_solve(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2_guess_B, injMdot):
     global mdot,Vinj #making them global so that i can use them in rk4 and ode functions
     
-    u_Preburner, T_Preburner = Preburner_ToCV(pstag_inlet, Tstag_inlet, u2_guess, T2_guess)
-    P_preburner, rho_Preburner = P_rho_InitialValues(u_Preburner, T_Preburner)
+    u_InjA_2, T_InjA_2 = InjA_Loss_CV(pstagA_2, u2_guess_A, T2_guess_A)
+    u_InjB_2, T_InjB_2 = InjB_Loss_CV(pstagB_2, u2_guess_B, T2_guess_B)
 
-    M_Preburner_Inlet = u_Preburner/np.sqrt(gamma(T_Preburner) * R * T_Preburner) #mach number at state 1 of injector to preburner CV
-    Pstag_Preburner_Inlet = pstag_inlet
+    u_preburner_guess = (u_InjA_2 * A_A + u_InjB_2 * A3)/(A_CV_END)
+    T_preburner_guess = (T_InjA_2 * mdotA + T_InjB_2 * mdotB)/(mdot_i)
+
+    u_preburner, T_preburner = CV_toPreburner(u_preburner_guess, T_preburner_guess, u_InjA_2, u_InjB_2, T_InjA_2, T_InjB_2)
+    P_preburner, rho_preburner = P_rho_InitialValues(u_preburner, T_preburner)
+    M_Preburner_Inlet = u_preburner/np.sqrt(gamma(T_preburner) * R * T_preburner) 
 
           #printing I.C. for preburner to inlet 
     print("Preburner Inlet Conditions from second solve")
-    print("Velocity = ", u_Preburner, " m/s")
-    print("Temperature = ", T_Preburner, " K")
+    print("Velocity = ", u_preburner, " m/s")
+    print("Temperature = ", T_preburner, " K")
     print("Pressure = ", P_preburner * 1e-6, " MPa")
     print("Mach Number = ", M_Preburner_Inlet)
     print("________________________________________________") 
 
-    temp = [T_Preburner]                # creating fresh arrays in function 
-    velocities = [u_Preburner]
+    temp = [T_preburner]                # creating fresh arrays in function 
+    velocities = [u_preburner]
     pressure = [P_preburner]
     machNum = [M_Preburner_Inlet]
-    density = [rho_Preburner]
-    pressureStag = [Pstag_Preburner_Inlet]
+    density = [rho_preburner]
     areaList = [Area(0)]
     dAdxList = [0.0]
 
     gas = ct.Solution('gri30.yaml')
-    gas.TPX = T_Preburner, P_preburner, {'N2': 1.0}
+    gas.TPX = T_preburner, P_preburner, {'N2': 1.0}
     sInitial = gas.entropy_mass
     entropy = [sInitial]
 
@@ -647,8 +685,6 @@ def second_solve(pstag_inlet, Tstag_inlet, u2_guess, T2_guess, injMdot):
         MCurrent = mNum(VCurrent,aCurrent)
         machNum.append(MCurrent)
 
-        pressureStag.append(pressureStagFunc(PCurrent,MCurrent,TCurrent))
-
         gas.TP = TCurrent, PCurrent
         sCurrent = gas.entropy_mass
         entropy.append(sCurrent)
@@ -663,7 +699,6 @@ def second_solve(pstag_inlet, Tstag_inlet, u2_guess, T2_guess, injMdot):
     T_List = np.array(temp)
     rho_List = np.array(density)
     M_List = np.array(machNum)
-    pStag_List = np.array(pressureStag)
 
     x_used_List = np.array(xList[:len(V_List)])
     Area_List = np.array(areaList)
@@ -682,7 +717,6 @@ def second_solve(pstag_inlet, Tstag_inlet, u2_guess, T2_guess, injMdot):
         "temperature": T_List,
         "density": rho_List,
         "mach_number": M_List,
-        "stagnation_pressure": pStag_List,
         "x": x_used_List,
         "area": Area_List,
         "dAdx": dAdx_List,
@@ -694,22 +728,18 @@ def second_solve(pstag_inlet, Tstag_inlet, u2_guess, T2_guess, injMdot):
 
 
 #results second solve
-results_second_solve = second_solve(stagnation_pressure_inlet, Tstag_inlet, velocity_Inlet_guess, temperature_Inlet_guess, injectorMdot_1stSolve)
+results_second_solve = second_solve(PstagA*0.9, PstagB*0.9, uA, TA, uB, TB, injectorMdot_1stSolve)
 x2= results_second_solve["x"]
 mdot_2nd_solve = results_second_solve["mdot"]
 velocity_List_2nd_solve = results_second_solve["velocity"]
 temperature_List_2nd_solve = results_second_solve["temperature"]
 pressure_List_2nd_solve = results_second_solve["pressure"]
 entropy_List_2nd_solve = results_second_solve["entropy"]
-stagnation_pressure_2nd_solve = results_second_solve["stagnation_pressure"]
 
-print("Stagnation Pressure at Preburner Inlet from second solve = ", stagnation_pressure_2nd_solve[0] * 1e-6, " MPa")
 print("Gamma at Preburner Inlet from second solve = ", gamma(temperature_List_2nd_solve[0]), "\n\n")
 
 
 
-
-    
 
 
 #plotting results 
@@ -735,15 +765,6 @@ plt.title('Plotting Pressure')
 plt.grid()
 
 '''
-
-plt.figure()
-plt.plot(x,stagnation_pressure, label='1st Solve')
-plt.plot(x2, stagnation_pressure_2nd_solve, label='2nd Solve')
-plt.xlabel('x (m)')
-plt.ylabel('Pressure Stagnation (Pa)')
-plt.title('Plotting Pressure Stagnation')
-plt.legend()
-plt.grid()
 
 
 plt.figure()

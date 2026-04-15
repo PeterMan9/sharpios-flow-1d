@@ -1,0 +1,55 @@
+Meeting
+
+Two sep process  
+
+mixing 
+expansions 
+
+mix 1 and mix1b
+have losses in one and losses 
+
+take picture of drawing he drew 
+
+state 1b introduce sgen 
+
+u cant really mass weigh non thermo dynamic stuff because 
+stuff like 
+
+could solve it with entropy and then solve it for P and T 
+
+use sgen on T and P formula 
+
+tehcnial reason 
+is the unidentifiable coeff model in the system 
+we have a model and governing equation 
+we also have pressure measurments 
+pressure mreasurments are not enough to identify coefficients beecayse there are multiple ways to increase and decreases data 
+
+idea is we put it a second model that biases our estimate for each of the coefficeints 
+we are now able to identiify each coeff 
+
+it will allow us to take extra info and use it to idenity the coeff
+
+it iwll be a hiarchirea coeff 
+
+applied to rocket driven 
+
+end goal is that by using this additional data to inform our models and be able to solve for "trained coditions"
+
+it is kinda of machine learning but there are not enough conditions to do a full machine learning approach
+not enough runs for this 
+
+so if we change the model 
+we have to retrain
+
+goal is that if they are adding an injector we can just have it run experimentally run like 50 to 100 times to get data and then retrain the model
+
+data lean regieme 
+
+baysian learning 
+
+
+aviation of scitech 
+
+
+he can be potentially as long as we have saftey stuff and testing 
