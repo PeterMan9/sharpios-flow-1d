@@ -5,84 +5,74 @@ import scipy
 from scipy.optimize import fsolve
 import cantera as ct
 
-
-
-
-
-#preburner conditions 
-
+#preburner inlet conditions 
 R = 296.8 #J/kgK
-L = 0.5 #m 
+L_tochoke = 0.5 #m 
+L_total = 0.7   #m
 f_darcy = 0.01
-Cf = f_darcy/4 #skin friction factor
+Cf = f_darcy/4
 gamma0 = 1.4
 
-#initial conditions for preburner inlet - will be solved/updated from the first solve function
 mdot = None
 Vinj = None 
 
+numSteps = int(2e5)
+dx = L_total / numSteps
+xList = np.arange(0, L_total + dx, dx)
 
+r0 = 0.0127
+D0 = 2 * r0
+A0 = np.pi * r0**2
+Astar = A0/25
+rStar = np.sqrt(Astar/np.pi)
+r_exit = r0
 
-numSteps = 2e5
-dx = L/numSteps
-xList = np.arange(0, L + dx, dx)
+x1_conv = 0.75 * L_tochoke #defining range where the area starts to converge 
+x2_conv = L_tochoke
 
-############################
-# GEOMETRY
-############################
+x1_div = L_tochoke #defining range where area starts to diverge
+x2_div = L_total
 
+def smoothstep(xi):
+    return 6*xi**5 - 15*xi**4 + 10*xi**3
 
+def dsmoothstep_dxi(xi):
+    return 30*xi**4 - 60*xi**3 + 30*xi**2
 
-r0 = 0.0127 #m
-D0 = 2 * r0 #m
-A0 = np.pi * r0**2 #m^2
-Astar = A0/25 #m^2
-rStar = np.sqrt(Astar/np.pi) #m
+def radius(x):
+    if x <= x1_conv:
+        return r0
+    elif x <= x2_conv:
+        xi = (x - x1_conv) / (x2_conv - x1_conv)
+        return r0 - (r0 - rStar) * smoothstep(xi)
+    elif x <= x2_div:
+        xi = (x - x1_div) / (x2_div - x1_div)
+        return rStar + (r_exit - rStar) * smoothstep(xi)
+    else:
+        return r_exit
 
 def Area(x):
-    x1 = 0.75 * L
-    x2 = L
-
-    if x <= x1:
-        r = r0
-    elif x >= x2:
-        r = rStar
-    else:
-        xi = (x - x1) / (x2 - x1)
-        s = 6*xi**5 - 15*xi**4 + 10*xi**3
-        r = r0 - (r0 - rStar) * s
-
+    r = radius(x)
     return np.pi * r**2
 
 def Dh(x):
-    x1 = 0.75 * L
-    x2 = L
-
-    if x <= x1:
-        r = r0
-    elif x >= x2:
-        r = rStar
-    else:
-        xi = (x - x1) / (x2 - x1)
-        s = 6*xi**5 - 15*xi**4 + 10*xi**3
-        r = r0 - (r0 - rStar) * s
-
-    return 2*r
+    return 2 * radius(x)
 
 def dAdx(x):
-    x1 = 0.75 * L 
-    x2 = L
-    xi = (x - x1) / (x2 - x1)
-    drdx =  - (r0 - rStar) * (30*xi**4 - 60*xi**3 + 30*xi**2) / (x2 - x1)
-    r = np.sqrt(Area(x)/np.pi)
-
-    if x <x1:
-        dadx = 0
-    elif x < x2:
-        dadx = 2 * np.pi * r * drdx
+    if x < x1_conv:
+        return 0.0
+    elif x <= x2_conv:
+        xi = (x - x1_conv) / (x2_conv - x1_conv)
+        drdx = -(r0 - rStar) * dsmoothstep_dxi(xi) / (x2_conv - x1_conv)
+        r = radius(x)
+        return 2 * np.pi * r * drdx
+    elif x <= x2_div:
+        xi = (x - x1_div) / (x2_div - x1_div)
+        drdx = (r_exit - rStar) * dsmoothstep_dxi(xi) / (x2_div - x1_div)
+        r = radius(x)
+        return 2 * np.pi * r * drdx
     else:
-        dadx = 0
-    return dadx
+        return 0.0
 
 def mNum(v,a): #mach number 
     M = v/a
@@ -102,7 +92,7 @@ qtotal = 200e3
 x_s = 0
 
 def dHtdx(x):#dht/dx profile - quadtratic Ht
-    return (qtotal/L) * (x - x_s)
+    return (qtotal/L_tochoke) * (x - x_s)
 
 # Nasa Polynomials
 
@@ -480,7 +470,7 @@ def first_solve(u2_guess,T2_guess):
     Ainj = np.pi * (Dinj/2)**2 #m^2 
     injMdot = rho_Preburner * Vinj * Ainj #kg/s 
 
-    x_injLocation = 0.15 * L #m
+    x_injLocation = 0.15 * L_tochoke #m
     injIndex = int(x_injLocation/dx) #index of the center of the injector 
     injIndexRange = int((Dinj/2)/dx) #range is +- so this is only half of total inj diameter
     inj_array = np.zeros(len(xList)) #array to hold injector locations (0 means no injector 1 means injector, 2 means post injector)
@@ -595,10 +585,10 @@ Tstag_inlet = temperature_List[0] * (1 + (gamma(temperature_List[0]) - 1)/2 * ma
 
 
 
-print("Second Solve:")
+print("Consecutive Solves:")
 print("________________________________________________\n")
 
-def second_solve(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2_guess_B, injMdot):
+def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2_guess_B, injMdot):
     global mdot,Vinj #making them global so that i can use them in rk4 and ode functions
     
     u_InjA_2, T_InjA_2 = InjA_Loss_CV(pstagA_2, u2_guess_A, T2_guess_A)
@@ -611,14 +601,15 @@ def second_solve(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2_guess
     P_preburner, rho_preburner = P_rho_InitialValues(u_preburner, T_preburner)
     M_Preburner_Inlet = u_preburner/np.sqrt(gamma(T_preburner) * R * T_preburner) 
 
-          #printing I.C. for preburner to inlet 
+    #printing I.C. for preburner to inlet 
+    '''
     print("Preburner Inlet Conditions from second solve")
     print("Velocity = ", u_preburner, " m/s")
     print("Temperature = ", T_preburner, " K")
     print("Pressure = ", P_preburner * 1e-6, " MPa")
     print("Mach Number = ", M_Preburner_Inlet)
     print("________________________________________________") 
-
+    '''
     temp = [T_preburner]                # creating fresh arrays in function 
     velocities = [u_preburner]
     pressure = [P_preburner]
@@ -642,7 +633,7 @@ def second_solve(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2_guess
     Ainj = np.pi * (Dinj/2)**2 #m^2 
     
 
-    x_injLocation = 0.15 * L #m
+    x_injLocation = 0.15 * L_tochoke #m
     injIndex = int(x_injLocation/dx) #index of the center of the injector 
     injIndexRange = int((Dinj/2)/dx) #range is +- so this is only half of total inj diameter
     inj_array = np.zeros(len(xList)) #array to hold injector locations (0 means no injector 1 means injector, 2 means post injector)
@@ -690,7 +681,7 @@ def second_solve(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2_guess
         entropy.append(sCurrent)
         
         if MCurrent >= 1:
-            print("Flow for 2nd solve is choked at x = ", xCurrent)
+            print("Flow for this solve is choked at x = ", xCurrent)
             break
 
     #converting to np arrays
@@ -723,24 +714,60 @@ def second_solve(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2_guess
         "mdot": mdot_List,
         "mdot_reconstructed": mdotReconsturcted_List,
         "entropy": entropy_List,
-        "xChocked": xCurrent
+        "xChoked": xCurrent
     }
 
 
-#results second solve
-results_second_solve = second_solve(PstagA*0.9, PstagB*0.9, uA, TA, uB, TB, injectorMdot_1stSolve)
-x2= results_second_solve["x"]
-mdot_2nd_solve = results_second_solve["mdot"]
-velocity_List_2nd_solve = results_second_solve["velocity"]
-temperature_List_2nd_solve = results_second_solve["temperature"]
-pressure_List_2nd_solve = results_second_solve["pressure"]
-entropy_List_2nd_solve = results_second_solve["entropy"]
+targetChoke = L_tochoke #m
+tol_choke= dx
+n_solves = 1 #number of solves. starting from 1 because we make an initial guess 
+max_iters = 20
 
-print("Gamma at Preburner Inlet from second solve = ", gamma(temperature_List_2nd_solve[0]), "\n\n")
+results_2nd_solve = consecutive_solves(PstagA*0.9, PstagB*0.9, uA, TA, uB, TB, injectorMdot_1stSolve) # initial guess 
+xChoke = results_2nd_solve["xChoked"] # initial guess/choke
 
 
+#bisection method 
+ #basically scales my pstag depending on if my residual is low or high 
+scale_low = 1.2 #lower bound of scale value 
+scale_high = 500 #upper bound of scale value 
+
+def chokedResiduals(scale):
+    results = consecutive_solves(PstagA*scale, PstagB*scale, uA, TA, uB, TB, injectorMdot_1stSolve)
+    xChoke = results["xChoked"]
+    residual = targetChoke - xChoke
+    return residual, xChoke, results
+
+#setting up braket for bisection method
+
+res_low,x_low,results_low = chokedResiduals(scale_low)
+res_high,x_high,results_high = chokedResiduals(scale_high)
+
+if res_high * res_low > 0:
+            print("Root is not bracketed")
 
 
+else:
+    for i in range(max_iters):
+        scale_mid = (scale_low + scale_high)/2
+        res_mid,x_mid,results_mid = chokedResiduals(scale_mid)
+        n_solves +=1
+
+        if res_low * res_mid < 0:
+            scale_high = scale_mid
+            res_high = res_mid
+        else:
+            scale_low = scale_mid
+            res_low = res_mid
+
+        if abs(res_mid) <= tol_choke:
+            print("Converged")
+            converged_results = results_mid
+            converged_scale = scale_mid
+            xChoke = x_mid
+            break
+
+    
 
 #plotting results 
 '''
@@ -764,8 +791,6 @@ plt.ylabel('Pressure 2nd Solve(Pa)')
 plt.title('Plotting Pressure')
 plt.grid()
 
-'''
-
 
 plt.figure()
 plt.plot(x,entropy_List, label='1st Solve')
@@ -777,3 +802,6 @@ plt.legend()
 plt.grid()
 
 plt.show()
+
+'''
+
