@@ -20,15 +20,15 @@ numSteps = int(2e5)
 dx = L_total / numSteps
 xList = np.arange(0, L_total + dx, dx)
 
-r0 = 0.0127
+r0 = 0.05 #m
 D0 = 2 * r0
 A0 = np.pi * r0**2
 Astar = A0/25
 rStar = np.sqrt(Astar/np.pi)
 r_exit = r0
 
-x1_conv = 0.75 * L_tochoke #defining range where the area starts to converge 
-x2_conv = L_tochoke
+x1_conv = 0.5 * L_tochoke #defining range where the area starts to converge 
+x2_conv = L_tochoke #where convergence ends and area is minimum
 
 x1_div = L_tochoke #defining range where area starts to diverge
 x2_div = L_total
@@ -40,12 +40,14 @@ def dsmoothstep_dxi(xi):
     return 30*xi**4 - 60*xi**3 + 30*xi**2
 
 def radius(x):
-    if x <= x1_conv:
+    if x <= x1_conv: #constant area section before convergence starts
         return r0
-    elif x <= x2_conv:
+    elif x <= x2_conv: #converging section 
         xi = (x - x1_conv) / (x2_conv - x1_conv)
+
         return r0 - (r0 - rStar) * smoothstep(xi)
-    elif x <= x2_div:
+    
+    elif x <= x2_div: #diverging section
         xi = (x - x1_div) / (x2_div - x1_div)
         return rStar + (r_exit - rStar) * smoothstep(xi)
     else:
@@ -73,6 +75,14 @@ def dAdx(x):
         return 2 * np.pi * r * drdx
     else:
         return 0.0
+
+fullAreaList = [Area(x) for x in xList]
+fullAreaRatioList = [A0/A for A in fullAreaList]
+fullArea_List = np.array(fullAreaList)
+fullAreaRatio_List = np.array(fullAreaRatioList)
+fullDadxList = [dAdx(x) for x in xList]
+fullDadx_List = np.array(fullDadxList)
+
 
 def mNum(v,a): #mach number 
     M = v/a
@@ -152,25 +162,33 @@ def pressureStagFunc(P,M,T):
     #1 - small injector 1 
     #2 - small injector 2
     #3 - big injector 3
-A1 = 7.917E-6 #m^2
-A2 = 7.917E-6 #m^2
-A3 = 3 * A1 #m^2
-A_A = A1 * 2 #m^2
+d1 = 0.012 #in
+d2 = d1
+d3 = 0.03
+
+r1 = d1 / 2
+r2 = r1
+r3 = d3 / 2
+
+A1 = (r1/39.37)**2 * np.pi #m^2
+A2 = (r2/39.37)**2 * np.pi #m^2
+A3 = (r3/39.37)**2 * np.pi #m^2
+A_A = A1 + A2 #m^2
 
 
-P1 = 5*1e6 #Pa
-P2 = 5*1e6 #Pa
-P3 = 2*1e6 #Pa
+P1 = 14*1e6 #Pa
+P2 = 14*1e6 #Pa
+P3 = 14*1e6 #Pa
 PA = P1 #Pa. Pa is equal to P1 and P2 because they are the same injector and they are connected to the same plenum.
 PB = P3 #Pa
 
-TA = 293 #K
-TA_2 = 293 #K
-TB = 293 #K
+TA = 300 #K
+TA_2 = 300 #K
+TB = 300 #K
 
-M1 = 0.4
-M2 = 0.4
-M3 = 0.6
+M1 = 0.95
+M2 = 0.95
+M3 = 0.95
 
 a1 = soS(TA)
 a2 = soS(TA_2)
@@ -417,178 +435,13 @@ def P_rho_InitialValues(ui,Ti): #finding the rest of the initial values for the 
     P = rho * R * Ti
     return P, rho
 
-#making an inital guess for newton raphson and then solving for initial values to throw into preburner code
-u_Guess_MixingCV = (uA * A_A + uB * A3)/A_CV_END
-T_Guess_MixingCV = (TA * A_A + TB * A3)/A_CV_END
-
-print("First Solve:")
-print("________________________________________________")
-
-
-
-
-#first solve function 
-def first_solve(u2_guess,T2_guess):
-
-    global mdot,Vinj #making them global so that i can use them in rk4 and ode functions
-    #solving Mixing CV
-    #calculating values at preburner inlet
-    u_Preburner, T_Preburner = CV_toPreburner(u2_guess, T2_guess,uA,uB,TA,TB)
-    P_preburner, rho_Preburner = P_rho_InitialValues(u_Preburner, T_Preburner)
-
-    M_Preburner_Inlet = u_Preburner/np.sqrt(gamma(T_Preburner) * R * T_Preburner) #mach number at state 1 of injector to preburner CV
-    Pstag_Preburner_Inlet = P_preburner * (1 + (gamma(T_Preburner) - 1)/2 * M_Preburner_Inlet**2)**(gamma(T_Preburner)/(gamma(T_Preburner)-1)) #stagnation pressure at inlet
-       #printing I.C. for preburner to inlet 
-    print("Preburner Inlet Conditions")
-    print("Velocity = ", u_Preburner, " m/s")
-    print("Temperature = ", T_Preburner, " K")
-    print("Pressure = ", P_preburner * 1e-6, " MPa")
-    print("Mach Number = ", M_Preburner_Inlet)
-    print("________________________________________________") 
-
-    temp = [T_Preburner]                # creating fresh arrays in function 
-    velocities = [u_Preburner]
-    pressure = [P_preburner]
-    machNum = [M_Preburner_Inlet]
-    density = [rho_Preburner]
-    pressureStag = [Pstag_Preburner_Inlet]
-    areaList = [Area(0)]
-    dAdxList = [0.0]
-
-    gas = ct.Solution('gri30.yaml')
-    gas.TPX = T_Preburner, P_preburner, {'N2': 1.0}
-    sInitial = gas.entropy_mass
-    entropy = [sInitial]
-
-    mdot = np.full(len(xList), mdot_i)
-    mdotReconsturcted = [] #recontruction array to check if calcs are correct 
-    mdotReconsturcted.append(mdot_i) 
-
-   # Creating Injector Array and Adding Mass Flow from Injector to global mdot array 
-    Vinj = 250 # m/s speed of N2 being injected (alr converted to x direction)
-    Dinj = 0.003175 #m Injector diameter
-    Ainj = np.pi * (Dinj/2)**2 #m^2 
-    injMdot = rho_Preburner * Vinj * Ainj #kg/s 
-
-    x_injLocation = 0.15 * L_tochoke #m
-    injIndex = int(x_injLocation/dx) #index of the center of the injector 
-    injIndexRange = int((Dinj/2)/dx) #range is +- so this is only half of total inj diameter
-    inj_array = np.zeros(len(xList)) #array to hold injector locations (0 means no injector 1 means injector, 2 means post injector)
-
-    startInj = max(0, int(injIndex - injIndexRange)) #start index of injector
-    endInj = min(len(xList)-1, int(injIndex + injIndexRange)) #end index of injector
-    inj_array[startInj:endInj+1] = 1 #mark injector location, +1 to include end index
-    inj_array[endInj+1:] = 2    #mark post injector locations +1 to start 1 after that end index #going to go over wtf this means 
-
-    mdot[startInj:endInj+1] = mdot_i + injMdot #add injector mass flow to main flow at injector location
-    mdot[endInj+1:] = mdot_i + injMdot #post injector mass flow
-
-        #solving flow through Preburner
-    for i in range(1, len(xList)): #actual for loop for solving everything. 
-        xCurrent = xList[i]      
-        mdotlocal = mdot[i]
-  
-        localAreaCurrent = Area(xCurrent)
-        areaList.append(localAreaCurrent)
-        dAdXCurrent = dAdx(xCurrent)
-        dAdxList.append(dAdXCurrent)
-
-        Vbefore = velocities[i-1]
-        Pbefore = pressure[i-1]
-        VCurrent, PCurrent = rk4Step(Vbefore,Pbefore, i)
-
-        velocities.append(VCurrent)
-        pressure.append(PCurrent)
-
-        rhoCurrent = mdotlocal/(Area(xList[i]) * VCurrent) 
-        density.append(rhoCurrent)
-
-        TCurrent = PCurrent/(rhoCurrent * R)
-        temp.append(TCurrent)
-
-         #using local/current mdot to get rho to get T and etc
-        mdotReconsturcted.append(rhoCurrent * VCurrent * localAreaCurrent)
-
-        aCurrent = soS(TCurrent)
-        MCurrent = mNum(VCurrent,aCurrent)
-        machNum.append(MCurrent)
-
-        pressureStag.append(pressureStagFunc(PCurrent,MCurrent,TCurrent))
-
-        gas.TP = TCurrent, PCurrent
-        sCurrent = gas.entropy_mass
-        entropy.append(sCurrent)
-        
-        if MCurrent >= 1:
-            print("Flow is choked at x = ", xCurrent)
-            break
-
-    #converting to np arrays
-    V_List = np.array(velocities)
-    P_List = np.array(pressure)
-    T_List = np.array(temp)
-    rho_List = np.array(density)
-    M_List = np.array(machNum)
-    pStag_List = np.array(pressureStag)
-
-    x_used_List = np.array(xList[:len(V_List)])
-    Area_List = np.array(areaList)
-    dAdx_List = np.array(dAdxList)
-
-    mdot_List = np.array(mdot[:len(V_List)])
-    mdotReconsturcted_List = np.array(mdotReconsturcted)
-    entropy_List = np.array(entropy)
-
-
-    print("Final Mach Number:", M_List[-1])
-
-    return {
-        "velocity": V_List,
-        "pressure": P_List,
-        "temperature": T_List,
-        "density": rho_List,
-        "mach_number": M_List,
-        "stagnation_pressure": pStag_List,
-        "x": x_used_List,
-        "area": Area_List,
-        "dAdx": dAdx_List,
-        "mdot": mdot_List,
-        "mdot_reconstructed": mdotReconsturcted_List,
-        "entropy": entropy_List,
-        "xChocked": xCurrent,
-        "mdot Injector": injMdot    
-    }
-
-
-#results from first solve
-results = first_solve(u_Guess_MixingCV, T_Guess_MixingCV)
-
-x= results["x"]
-velocity_List = results["velocity"]
-rho_List = results["density"]
-pressure_List = results["pressure"]
-temperature_List = results["temperature"]
-density_List = results["density"]
-machNum_List = results["mach_number"]
-mdot_List = results["mdot"]
-mdotReconsturcted_List = results["mdot_reconstructed"]
-entropy_List = results["entropy"]
-stagnation_pressure = results["stagnation_pressure"]
-print("Stagnation Pressure at Preburner Inlet from first solve = ", stagnation_pressure[0] * 1e-6, " MPa")
-print("Gamma at Preburner Inlet from first solve = ", gamma(temperature_List[0]), "\n\n")
-
-injectorMdot_1stSolve = results["mdot Injector"]
-
-#second solve
-stagnation_pressure_inlet = stagnation_pressure[0] * 0.9 #assuming 10% loss from mixing
-Tstag_inlet = temperature_List[0] * (1 + (gamma(temperature_List[0]) - 1)/2 * machNum_List[0]**2) #isentropic relation to get Tstag at inlet
-
+#consecutive solves
 
 
 print("Consecutive Solves:")
 print("________________________________________________\n")
 
-def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2_guess_B, injMdot):
+def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2_guess_B, numSolves):
     global mdot,Vinj #making them global so that i can use them in rk4 and ode functions
     
     u_InjA_2, T_InjA_2 = InjA_Loss_CV(pstagA_2, u2_guess_A, T2_guess_A)
@@ -602,14 +455,14 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     M_Preburner_Inlet = u_preburner/np.sqrt(gamma(T_preburner) * R * T_preburner) 
 
     #printing I.C. for preburner to inlet 
-    '''
-    print("Preburner Inlet Conditions from second solve")
-    print("Velocity = ", u_preburner, " m/s")
-    print("Temperature = ", T_preburner, " K")
-    print("Pressure = ", P_preburner * 1e-6, " MPa")
-    print("Mach Number = ", M_Preburner_Inlet)
-    print("________________________________________________") 
-    '''
+    
+    print("Preburner Inlet Conditions from solve number:", numSolves)
+    #print("Velocity = ", u_preburner, " m/s")
+    #print("Temperature = ", T_preburner, " K")
+    #print("Pressure = ", P_preburner * 1e-3, " kPa")
+    #print("Mach Number = ", M_Preburner_Inlet)
+    #print("________________________________________________") 
+    
     temp = [T_preburner]                # creating fresh arrays in function 
     velocities = [u_preburner]
     pressure = [P_preburner]
@@ -617,6 +470,7 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     density = [rho_preburner]
     areaList = [Area(0)]
     dAdxList = [0.0]
+    areaRatio = [1.0]
 
     gas = ct.Solution('gri30.yaml')
     gas.TPX = T_preburner, P_preburner, {'N2': 1.0}
@@ -631,7 +485,7 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     Vinj = 250 # m/s speed of N2 being injected (alr converted to x direction)
     Dinj = 0.003175 #m Injector diameter
     Ainj = np.pi * (Dinj/2)**2 #m^2 
-    
+    injMdot = rho_preburner * Vinj * Ainj #kg/s
 
     x_injLocation = 0.15 * L_tochoke #m
     injIndex = int(x_injLocation/dx) #index of the center of the injector 
@@ -650,9 +504,12 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     for i in range(1, len(xList)): #actual for loop for solving everything. 
         xCurrent = xList[i]      
         mdotlocal = mdot[i]
-  
+
         localAreaCurrent = Area(xCurrent)
         areaList.append(localAreaCurrent)
+
+        areaRatio.append(localAreaCurrent/Area(0))
+
         dAdXCurrent = dAdx(xCurrent)
         dAdxList.append(dAdXCurrent)
 
@@ -680,6 +537,8 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
         sCurrent = gas.entropy_mass
         entropy.append(sCurrent)
         
+
+
         if MCurrent >= 1:
             print("Flow for this solve is choked at x = ", xCurrent)
             break
@@ -690,6 +549,7 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     T_List = np.array(temp)
     rho_List = np.array(density)
     M_List = np.array(machNum)
+    AreaRatio_List = np.array(areaRatio)
 
     x_used_List = np.array(xList[:len(V_List)])
     Area_List = np.array(areaList)
@@ -701,6 +561,7 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
 
 
     print("Final Mach Number:", M_List[-1])
+    print("Area Ratio at Choke Point:", Area_List[-1]/Area_List[0])
 
     return {
         "velocity": V_List,
@@ -714,44 +575,127 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
         "mdot": mdot_List,
         "mdot_reconstructed": mdotReconsturcted_List,
         "entropy": entropy_List,
-        "xChoked": xCurrent
+        "xChoked": xCurrent,
+        "Area Ratio": AreaRatio_List    
     }
 
 
 targetChoke = L_tochoke #m
 tol_choke= dx
-n_solves = 1 #number of solves. starting from 1 because we make an initial guess 
-max_iters = 20
+n_solves = 1 #number of solves. 
 
-results_2nd_solve = consecutive_solves(PstagA*0.9, PstagB*0.9, uA, TA, uB, TB, injectorMdot_1stSolve) # initial guess 
-xChoke = results_2nd_solve["xChoked"] # initial guess/choke
+results_consecutive_solve = consecutive_solves(PstagA*0.9, PstagB*0.9, uA, TA, uB, TB, n_solves) # initial stag pressure loss guess 
+xChoke = results_consecutive_solve["xChoked"] # initial guess/choke
+AreaRatio = results_consecutive_solve["Area Ratio"]
+xList_consecutive = results_consecutive_solve["x"]
 
+#function to basically sweep through a bunch of diff scales to see if I can find a good bracket for bisection method
 
-#bisection method 
- #basically scales my pstag depending on if my residual is low or high 
-scale_low = 1.2 #lower bound of scale value 
-scale_high = 500 #upper bound of scale value 
+def safe_chokedResiduals(scale,numSolves):
+    try: #i am using try and except to catch any errors such as cantera errors etc, and then just returning None for those cases so that the code does not crash
+        results = consecutive_solves(PstagA*scale, PstagB*scale, uA, TA, uB, TB, numSolves)
+        xChoke = results["xChoked"]
+        residual = targetChoke - xChoke
 
-def chokedResiduals(scale):
-    results = consecutive_solves(PstagA*scale, PstagB*scale, uA, TA, uB, TB, injectorMdot_1stSolve)
-    xChoke = results["xChoked"]
-    residual = targetChoke - xChoke
-    return residual, xChoke, results
+        if not np.isfinite(xChoke):
+            return None, None, None, False
+
+        if not np.isfinite(residual):
+            return None, None, None, False
+        return residual, xChoke, results,True
+    
+    except:
+        return None, None, None, False
+
+scale_initial = 1 #starting off at 0% loss or scale 1
+dscale = 0.01 #how much i am changing the scale by per iter
+max_iters = 100   #max num of iter
+
+scales_plot = [] #def array for plotting error vs scale
+errors_plot = []
+
+res_center, x_center, results_center, ok_center = safe_chokedResiduals(scale_initial, n_solves) #initial check
+
+if not ok_center: #checking initial scale guess
+    print("Initial scale is bad. Pick a safer scale_initial.")
+else: #if initial scale good then creating live graph to plot error vs scale. also sweeping through scale to find good bracket
+    scales_plot.append(scale_initial)
+    errors_plot.append(res_center)
+
+    bracket_found = False
+
+    plt.ion()  # turn on interactive mode
+
+    fig, ax = plt.subplots()
+    line, = ax.plot([], [], 'o-')
+    ax.axhline(0, linestyle='--')
+
+    ax.set_xlabel("Scale")
+    ax.set_ylabel("Error (target - xChoke)")
+    ax.set_title("Error vs Scale")
+    ax.grid()
+
+    for i in range(1, max_iters + 1):
+
+        for direction in [-1]:
+
+            scale_test = scale_initial + direction * i * dscale
+
+            if scale_test <= 0:
+                continue
+
+            res_test, x_test, results_test, ok_test = safe_chokedResiduals(scale_test, n_solves + i)
+
+            if not ok_test:
+                print("scale bad:", scale_test)
+                continue
+
+            scales_plot.append(scale_test)
+            errors_plot.append(res_test)
+            line.set_xdata(scales_plot)
+            line.set_ydata(errors_plot)
+
+            ax.relim()          # recompute limits
+            ax.autoscale_view() # rescale axes
+
+            plt.draw()
+
+            print("scale good:", scale_test, "xChoke:", x_test, "res:", res_test)
+
+            if res_center * res_test < 0:
+                scale_low = min(scale_initial, scale_test)
+                scale_high = max(scale_initial, scale_test)
+                bracket_found = True
+                print("Bracket found:", scale_low, scale_high)
+                break
+
+        if bracket_found:
+            break
+
+    if not bracket_found:
+        print("No bracket found.")
+
 
 #setting up braket for bisection method
+'''
+res_low, x_low, results_low, ok_low = safe_chokedResiduals(scale_low)
+res_high, x_high, results_high, ok_high = safe_chokedResiduals(scale_high)
 
-res_low,x_low,results_low = chokedResiduals(scale_low)
-res_high,x_high,results_high = chokedResiduals(scale_high)
-
-if res_high * res_low > 0:
-            print("Root is not bracketed")
+if not ok_low:
+    print("scale_low is unsafe")
+if not ok_high:
+    print("scale_high is unsafe")
 
 
 else:
     for i in range(max_iters):
         scale_mid = (scale_low + scale_high)/2
-        res_mid,x_mid,results_mid = chokedResiduals(scale_mid)
+        res_mid,x_mid,results_mid,ok_mid = safe_chokedResiduals(scale_mid)
         n_solves +=1
+
+        if not ok_mid:
+            print(f"scale_mid = {scale_mid:.3f} is unsafe")
+            continue
 
         if res_low * res_mid < 0:
             scale_high = scale_mid
@@ -767,7 +711,7 @@ else:
             xChoke = x_mid
             break
 
-    
+'''    
 
 #plotting results 
 '''
@@ -799,6 +743,38 @@ plt.xlabel('x (m)')
 plt.ylabel('Entropy 2nd Solve(J/kg/K)')
 plt.title('Plotting Entropy')
 plt.legend()
+plt.grid()
+
+plt.figure()
+plt.plot(scales_plot, errors_plot, 'o-')
+plt.axhline(0, linestyle='--')   # zero line
+plt.xlabel("Scale")
+plt.ylabel("Error (target - xChoke)")
+plt.title("Error vs Scale")
+plt.grid()
+plt.show()
+
+
+
+plt.figure()
+plt.plot(xList, fullArea_List, 'o-')
+plt.xlabel("x")
+plt.ylabel("Area")
+plt.title("Area vs x")
+plt.grid()
+
+plt.figure()
+plt.plot(xList, fullAreaRatio_List, 'o-')
+plt.xlabel("x")
+plt.ylabel("Area Ratio")
+plt.title("Area Ratio vs x")
+plt.grid()
+
+plt.figure()
+plt.plot(xList, fullDadxList, 'o-')
+plt.xlabel("x")
+plt.ylabel("dA/dx")
+plt.title("dA/dx vs x")
 plt.grid()
 
 plt.show()
