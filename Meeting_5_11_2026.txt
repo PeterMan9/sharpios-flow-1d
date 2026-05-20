@@ -1,0 +1,33 @@
+meeting 5/11/26
+
+scipy rk45
+
+
+try increasing stag pressure
+
+aonther method is getting a residual between choked mass flow rate vs imposed mass flow rate 
+and then using bisection method for that
+
+pymc
+
+de metropolis method 
+
+heated mcmc
+
+simulated tempered mcmc 
+
+dont want to use weak priors but dont want to use too strong ones
+
+we want to impose some priors 
+
+no smarts model - just give it a combustion efficiency.
+
+
+look at the throat residual calculation and implement that into my own code
+
+try running it with something 
+simple pymc example 
+1 chain 
+your own ode your own blackbox solver
+
+pymc do the starter examples

@@ -1,0 +1,10 @@
+have code skip 
+mixing 
+
+u have a fixed area, fixed Tnot, fixed mdot 
+Pnot * scale 
+
+get an estimate of what strag pressure should be 
+
+i dont have mixing. i just have stag pressure loss from one point to another. 
+
