@@ -12,21 +12,8 @@ f_darcy = 0.02
 Cf = f_darcy/4
 gamma0 = 1.4
 
-mdot = None
 Vinj = None 
-
-numSteps = int(2e5)
-dx = L_total / numSteps
-xList = np.arange(0, L_total + dx, dx)
-
-numSteps_rk45 = int(1e3)
-dx_rk45 = L_tochoke / numSteps_rk45
-xList_rk45 = np.zeros(numSteps_rk45)
-xList_rk45[1] = 0 + dx_rk45
-h_rk45 = np.zeros(numSteps_rk45)
-h_rk45[0] = dx_rk45
-
-
+injMdot = 0
 
 r0 = 0.05 #m
 D0 = 2 * r0
@@ -37,6 +24,9 @@ r_exit = r0
 
 x1_conv = 0.5 * L_tochoke #defining range where the area starts to converge 
 x2_conv = L_tochoke #where convergence ends and area is minimum
+x_injLocation = 0.15 * L_tochoke #m
+
+
 
 x1_div = L_tochoke #defining range where area starts to diverge
 x2_div = L_total
@@ -84,14 +74,6 @@ def dAdx(x):
     else:
         return 0.0
 
-fullAreaList = [Area(x) for x in xList]
-fullAreaRatioList = [A0/A for A in fullAreaList]
-fullArea_List = np.array(fullAreaList)
-fullAreaRatio_List = np.array(fullAreaRatioList)
-fullDadxList = [dAdx(x) for x in xList]
-fullDadx_List = np.array(fullDadxList)
-
-
 def mNum(v,a): #mach number 
     M = v/a
     return M
@@ -99,11 +81,6 @@ def mNum(v,a): #mach number
 def soS(T): #solving for a using variable gamma and Cp 
     a = np.sqrt(gamma(T) * R * T)
     return a
-
-
-def delMdotdx(mdotn1, mdotn,x1,x): #dmdot/dx function
-    return (mdotn1 - mdotn)/(x1-x)
-
 
 #dhtdx profile
 qtotal = 200e3
@@ -124,6 +101,73 @@ def gamma(T):#solving for gamma using
 def hTNasa(T): #solving for static enthalpy using NASA polynomials for N2
     return (0.02926640*10**2 + (0.14879768E-02 * T)/2 - (0.05684760E-05 * T**2)/3 + (0.10097038E-09 * T**3)/4 - (0.06753351E-13 * T**4)/5) * R * T
 
+#initial conditions and mixing solver  
+d1 = 0.25#in
+d2 = d1
+d3 = 0.25
+
+r1 = d1 / 2
+r2 = r1
+r3 = d3 / 2
+
+A1 = (r1/39.37)**2 * np.pi #m^2
+A2 = (r2/39.37)**2 * np.pi #m^2
+A3 = (r3/39.37)**2 * np.pi #m^2
+A_A = A1 + A2 #m^2
+A_airInjs = 3 * A_A
+A_H2Injs = 3 * A3
+
+P1 = 20*1e6 #Pa
+P2 = 20*1e6 #Pa
+P3 = 20*1e6 #Pa
+PA = P1 #Pa. Pa is equal to P1 and P2 because they are the same injector and they are connected to the same plenum.
+PB = P3 #Pa
+
+TA = 300 #K
+TA_2 = 300 #K
+TB = 300 #K
+
+M1 = 0.95
+M2 = 0.95
+M3 = 0.95
+
+a1 = soS(TA)
+a2 = soS(TA_2)
+a3 = soS(TB)
+
+uA = M1 * a1
+uA_2 = M2 * a2
+uB = M3 * a3
+
+TstagA = TA * (1 + (gamma(TA) - 1)/2 * M1**2)
+TstagB = TB * (1 + (gamma(TB) - 1)/2 * M3**2)
+
+PstagA = PA * (1 + (gamma(TA) - 1)/2 * M1**2)**(gamma(TA)/(gamma(TA)-1))
+PstagB = PB * (1 + (gamma(TB) - 1)/2 * M3**2)**(gamma(TB)/(gamma(TB)-1))
+
+rho1 = P1/(R*TA) #will have to define R for diff species etc - but for now they are all the same
+rho2 = P2/(R*TA_2)
+rho3 = P3/(R*TB)
+
+print("rho1", rho1)
+
+mdot1 = rho1 * A_airInjs * uA
+mdot2 = rho2 * A_airInjs * uA_2
+mdot3 = rho3 * A_H2Injs * uB
+
+mdotA = mdot1 + mdot2 #injector 1 and 2 are the same so can just add them together
+mdotB = mdot3 #big injector
+mdot_i = mdotA + mdotB
+
+A_CV_END = A0 #area at the end of the CV is the same as the area at the start of the preburner inlet.
+def delMdotdx(mdotn1, mdotn,x1,x): #dmdot/dx function
+    return (mdotn1 - mdotn)/(x1-x)
+
+def mdotFuncX (x):
+    if x < x_injLocation: #pre injector mdot
+        return mdot_i
+    else:   #post injector mdot
+        return mdot_i + injMdot 
 
 # Functions for solving ODEs -functions that solve for dV/dx and dP/dx - based off of 1d sharpios flow equations 
 
@@ -162,80 +206,6 @@ def pstag_predicted(mdot,T,Astar,Tstag):
     Pstag_pred = mdot * (np.sqrt(Tstag)/Astar) / (np.sqrt(gamma(T) / R) * ((gamma(T) + 1)/2)**(-(gamma(T) + 1)/(2*(gamma(T)-1))))
     return Pstag_pred
 
-# mixing CV inital conditions and mixing CV to preburner inlet functions 
-#Defining cv for mixing 
-#3 injectors - 2 of the same and one bigger one. 
-#pressure, temp, Area, Mach number are the all known for the injectors 
-#give somem kinda cv length 
-#area will stay the same 
-#known for outlet - area preburner, mass flow, 
-# need to solve for mach number, temp, pressure and then plug them into my current code 
-# start with isentropic for solving from the injector to the breburner. 
-
-#defining initial values for injectors 
-#legend
-    #1 - small injector 1 
-    #2 - small injector 2
-    #3 - big injector 3
-
-d1 = 0.25#in
-d2 = d1
-d3 = 0.25
-
-r1 = d1 / 2
-r2 = r1
-r3 = d3 / 2
-
-A1 = (r1/39.37)**2 * np.pi #m^2
-A2 = (r2/39.37)**2 * np.pi #m^2
-A3 = (r3/39.37)**2 * np.pi #m^2
-A_A = A1 + A2 #m^2
-
-
-P1 = 20*1e6 #Pa
-P2 = 20*1e6 #Pa
-P3 = 20*1e6 #Pa
-PA = P1 #Pa. Pa is equal to P1 and P2 because they are the same injector and they are connected to the same plenum.
-PB = P3 #Pa
-
-TA = 300 #K
-TA_2 = 300 #K
-TB = 300 #K
-
-M1 = 0.95
-M2 = 0.95
-M3 = 0.95
-
-a1 = soS(TA)
-a2 = soS(TA_2)
-a3 = soS(TB)
-
-uA = M1 * a1
-uA_2 = M2 * a2
-uB = M3 * a3
-
-print("uA: ", uA, "uB: ", uB)
-
-TstagA = TA * (1 + (gamma(TA) - 1)/2 * M1**2)
-TstagB = TB * (1 + (gamma(TB) - 1)/2 * M3**2)
-
-PstagA = PA * (1 + (gamma(TA) - 1)/2 * M1**2)**(gamma(TA)/(gamma(TA)-1))
-PstagB = PB * (1 + (gamma(TB) - 1)/2 * M3**2)**(gamma(TB)/(gamma(TB)-1))
-
-rho1 = P1/(R*TA) #will have to define R for diff species etc - but for now they are all the same
-rho2 = P2/(R*TA_2)
-rho3 = P3/(R*TB)
-
-mdot1 = 2
-mdot2 = 2
-mdot3 = 2
-
-
-mdotA = mdot1 + mdot2 #injector 1 and 2 are the same so can just add them together
-mdotB = mdot3 #big injector
-mdot_i = mdotA + mdotB
-
-A_CV_END = A0 #area at the end of the CV is the same as the area at the start of the preburner inlet.
 
 
 def E1_CV(ui,Ti,uA,uB,TA,TB):
@@ -252,14 +222,14 @@ def E3_InjA_CV(PstagA_2, uA_2, TA_2): #third cv equation check power point for i
     part2 = (1 + ((gamma(TA_2) - 1)/2) * ((uA_2/soS(TA_2))**2))
     part3 = (1 - 1*(gamma(TA_2)/(gamma(TA_2)-1)))
     rhoA = part1 * part2**part3
-    return rhoA * uA_2 * A_A - mdotA
+    return rhoA * uA_2 * A_airInjs - mdotA
 
 def E4_InjB_CV(PstagB_2, uB_2, TB_2): #third cv equation check power point for indepth breakdown
     part1 = (PstagB_2/(R * TstagB))
     part2 = (1 + ((gamma(TB_2) - 1)/2) * ((uB_2/soS(TB_2))**2))
     part3 = (1 - 1*(gamma(TB_2)/(gamma(TB_2)-1)))
     rhoB = part1 * part2**part3
-    return rhoB * uB_2 * A3 - mdotB
+    return rhoB * uB_2 * A_H2Injs - mdotB
 
 def E5_InjA_CV(TA_2,uA_2):
     return TA_2 * (1 + (gamma(TA_2) - 1)/2 * (uA_2/soS(TA_2))**2) - TstagA
@@ -379,156 +349,97 @@ def InjB_Loss_CV(Pstag_B2,uB_2, TB_2):
     
     return uB_2, TB_2
 
-#rk4 function
-def rk4Step(V,P,Cf, i): 
-    #rk4 dvdx is coupled with dhtdx so have to solve both odes - no need to rk4 Ht and etc tho cuz i know dhtdx profile
-    # doing rk4 only on V and P. can solve using two options. the easy way which is through mdot and ideal gas law other 
-    #other way is to get static enthlapy (integrate dhtdx etc) and set equal to static enthlapy from nasa polynomials, 
-    #and then use fsolve to get Temp (this is harder and more "error" due to fsolve also solving intererativaly)
-    x = xList[i] 
 
-    #k1
-    dHtdx1 = dHtdx(x)
-    V1 = V
-    P1 = P
-    x1 = x
-    A1 = Area(x1)
-    rho1 = mdot[i]/(A1 * V1)
-    T1 = P1/(rho1 * R)
-    cp1 = CpNasa(T1)
-    a1 = soS(T1)
-    M1 = mNum(V1,a1)
-    k1V = dVdX(V1,A1,M1,cp1,T1,dAdx(x1),dHtdx1,mdot[i],delMdotdx(mdot[i],mdot[i-1],x1,x1-dx),Dh(x), Cf)
-    k1P = dPdX(P1,V1,A1,M1,cp1,T1,dAdx(x1),dHtdx1,mdot[i],delMdotdx(mdot[i],mdot[i-1],x1,x1-dx),Dh(x), Cf)
-
-    #k2
-    V2 = V + (k1V * dx/2)
-    P2 = P + (k1P * dx/2)
-    x2 = x + dx/2
-    dHtdx2 = dHtdx(x2)
-    rho2 = mdot[i]/(Area(x2) * V2)
-    T2 = P2/(rho2 * R)
-    cp2 = CpNasa(T2)
-    a2 = soS(T2)
-    M2 = mNum(V2,a2)
-    A2 = Area(x2)
-    k2V = dVdX(V2,A2,M2,cp2,T2,dAdx(x2),dHtdx2,mdot[i],delMdotdx(mdot[i],mdot[i-1],x2,x1),Dh(x2), Cf)
-    k2P = dPdX(P2,V2,A2,M2,cp2,T2,dAdx(x2),dHtdx2,mdot[i],delMdotdx(mdot[i],mdot[i-1],x2,x1),Dh(x2), Cf)
-
-    #k3
-    V3 = V + (k2V * dx/2)
-    P3 = P + (k2P * dx/2)
-    x3 = x + dx/2
-    dHtdx3 = dHtdx(x3)
-    rho3 = mdot[i]/(Area(x3) * V3)
-    T3 = P3/(rho3 * R)
-    cp3 = CpNasa(T3)
-    a3 = soS(T3)
-    M3 = mNum(V3,a3)
-    A3 = Area(x3)
-    k3V = dVdX(V3,A3,M3,cp3,T3,dAdx(x3),dHtdx3,mdot[i],delMdotdx(mdot[i],mdot[i-1],x3,x1),Dh(x3), Cf)
-    k3P = dPdX(P3,V3,A3,M3,cp3,T3,dAdx(x3),dHtdx3,mdot[i],delMdotdx(mdot[i],mdot[i-1],x3,x1),Dh(x3), Cf)
-
-    #k4
-    V4 = V + (k3V * dx)
-    P4 = P + (k3P * dx)
-    x4 = x + dx
-    dHtdx4 = dHtdx(x4)
-    rho4 = mdot[i]/(Area(x4) * V4)
-    T4 = P4/(rho4 * R)
-    cp4 = CpNasa(T4)
-    a4 = soS(T4)
-    M4 = mNum(V4,a4)
-    A4 = Area(x4)
-    k4V = dVdX(V4,A4,M4,cp4,T4,dAdx(x4),dHtdx4,mdot[i],delMdotdx(mdot[i],mdot[i-1],x4,x1),Dh(x4), Cf)
-    k4P = dPdX(P4,V4,A4,M4,cp4,T4,dAdx(x4),dHtdx4,mdot[i],delMdotdx(mdot[i],mdot[i-1],x4,x1),Dh(x4), Cf)
-
-    Vnext = V + (1/6) * (k1V + 2*k2V + 2*k3V + k4V) * dx
-    Pnext = P + (1/6) * (k1P + 2*k2P + 2*k3P + k4P) * dx
-    return Vnext, Pnext
-
-def rk45Step(V,P,Cf, h, i, tol = 1e-6):
+#rk45
+def rk45Step(V,P,Cf, h, x): #add stages for each mdot 
     accepted = False 
-
+    tol = 1e-6
     while (accepted != True):
+        mdot_Current = mdotFuncX(x)
+        mdot_Prev = mdotFuncX(x-h)
 
-        x1 = xList_rk45[i]
+        x1 = x
         dHtdx1 = dHtdx(x1)
         A1 = Area(x1)
+        print("A1", A1)
         V1 = V
         P1 =  P
-        rho1 = mdot[i]/(A1 * V1)
+        rho1 = mdot_Current/(A1 * V1)
         T1 = P1/(rho1 * R)
         cp1 = CpNasa(T1)
         a1 = soS(T1)
         M1 = mNum(V1,a1)
-        k1V = h * dVdX(V1,A1,M1,cp1,T1,dAdx(x1),dHtdx1,mdot[i],delMdotdx(mdot[i],mdot[i-1],x1,x1-dx),Dh(x1), Cf)
-        k1P = h * dPdX(P1,V1,A1,M1,cp1,T1,dAdx(x1),dHtdx1,mdot[i],delMdotdx(mdot[i],mdot[i-1],x1,x1-dx),Dh(x1), Cf)
+        k1V = h * dVdX(V1,A1,M1,cp1,T1,dAdx(x1),dHtdx1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Dh(x1), Cf)
+        k1P = h * dPdX(P1,V1,A1,M1,cp1,T1,dAdx(x1),dHtdx1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Dh(x1), Cf)
+        print("V1", V1, "P1", P1,"T1", T1, "rho1", rho1)
 
         x2 = x1 + 1/5 * h
         dHtdx2 = dHtdx(x2)
         A2 = Area(x2)
         V2 = V + 1/5 * k1V 
         P2 = P + 1/5 * k1P
-        rho2 = mdot[i]/(A2 * V2)
+
+        rho2 = mdot_Current/(A2 * V2)
         T2 = P2/(rho2 * R)
         cp2 = CpNasa(T2)
         a2 = soS(T2)
         M2 = mNum(V2,a2)
-        k2V = h * dVdX(V2,A2,M2,cp2,T2,dAdx(x2),dHtdx2,mdot[i],delMdotdx(mdot[i],mdot[i-1],x2,x1),Dh(x2), Cf)
-        k2P = h * dPdX(P2,V2,A2,M2,cp2,T2,dAdx(x2),dHtdx2,mdot[i],delMdotdx(mdot[i],mdot[i-1],x2,x1),Dh(x2), Cf)
+        k2V = h * dVdX(V2,A2,M2,cp2,T2,dAdx(x2),dHtdx2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Dh(x2), Cf)
+        k2P = h * dPdX(P2,V2,A2,M2,cp2,T2,dAdx(x2),dHtdx2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Dh(x2), Cf)
+        print("V2", V2, "P2", P2,"T2", T2)
+
 
         x3 = x1 + 3/10 * h
         dHtdx3 = dHtdx(x3)
         A3 = Area(x3)
         V3 = V + 3/40 * k1V + 9/40 * k2V
         P3 = P + 3/40 * k1P + 9/40 * k2P
-        rho3 = mdot[i]/(A3 * V3)
+        rho3 = mdot_Current/(A3 * V3)
         T3 = P3/(rho3 * R)
         cp3 = CpNasa(T3)
-        a3 = soS(T3),
+        a3 = soS(T3)
         M3 = mNum(V3,a3)
-        k3V = h * dVdX(V3,A3,M3,cp3,T3,dAdx(x3),dHtdx3,mdot[i],delMdotdx(mdot[i],mdot[i-1],x3,x1),Dh(x3), Cf)
-        k3P = h * dPdX(P3,V3,A3,M3,cp3,T3,dAdx(x3),dHtdx3,mdot[i],delMdotdx(mdot[i],mdot[i-1],x3,x1),Dh(x3), Cf)
-
+        k3V = h * dVdX(V3,A3,M3,cp3,T3,dAdx(x3),dHtdx3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Dh(x3), Cf)
+        k3P = h * dPdX(P3,V3,A3,M3,cp3,T3,dAdx(x3),dHtdx3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Dh(x3), Cf)
+      
         x4 = x1 + 4/5 * h
         dHtdx4 = dHtdx(x4)
         A4 = Area(x4)
         V4 = V + 44/45 * k1V - 56/15 * k2V + 32/9 * k3V
         P4 = P + 44/45 * k1P - 56/15 * k2P + 32/9 * k3P
-        rho4 = mdot[i]/(A4 * V4)
+        rho4 = mdot_Current/(A4 * V4)
         T4 = P4/(rho4 * R)
         cp4 = CpNasa(T4)
         a4 = soS(T4)
         M4 = mNum(V4,a4)
-        k4V = h * dVdX(V4,A4,M4,cp4,T4,dAdx(x4),dHtdx4,mdot[i],delMdotdx(mdot[i],mdot[i-1],x4,x1),Dh(x4), Cf)
-        k4P = h * dPdX(P4,V4,A4,M4,cp4,T4,dAdx(x4),dHtdx4,mdot[i],delMdotdx(mdot[i],mdot[i-1],x4,x1),Dh(x4), Cf)
+        k4V = h * dVdX(V4,A4,M4,cp4,T4,dAdx(x4),dHtdx4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Dh(x4), Cf)
+        k4P = h * dPdX(P4,V4,A4,M4,cp4,T4,dAdx(x4),dHtdx4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Dh(x4), Cf)
 
         x5 = x1 + 8/9 * h
-        dHtdx5 = dHtdx(x5),
+        dHtdx5 = dHtdx(x5)
         A5 = Area(x5)
         V5 = V + 19372/6561 * k1V - 25360/2187 * k2V + 64448/6561 * k3V - 212/729 * k4V
         P5 = P + 19372/6561 * k1P - 25360/2187 * k2P + 64448/6561 * k3P - 212/729 * k4P
-        rho5 = mdot[i]/(A5 * V5)
+        rho5 = mdot_Current/(A5 * V5)
         T5 = P5/(rho5 * R)
         cp5 = CpNasa(T5)
-        a5 = soS(T5),
+        a5 = soS(T5)
         M5 = mNum(V5,a5)
-        k5V = h * dVdX(V5,A5,M5,cp5,T5,dAdx(x5),dHtdx5,mdot[i],delMdotdx(mdot[i],mdot[i-1],x5,x1),Dh(x5), Cf)
-        k5P = h * dPdX(P5,V5,A5,M5,cp5,T5,dAdx(x5),dHtdx5,mdot[i],delMdotdx(mdot[i],mdot[i-1],x5,x1),Dh(x5), Cf)
+        k5V = h * dVdX(V5,A5,M5,cp5,T5,dAdx(x5),dHtdx5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Dh(x5), Cf)
+        k5P = h * dPdX(P5,V5,A5,M5,cp5,T5,dAdx(x5),dHtdx5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Dh(x5), Cf)
 
         x6 = x1 + h
         dHtdx6 = dHtdx(x6)
         A6 = Area(x6)
         V6 = V + 9017/3168 * k1V - 355/33 * k2V + 46732/5247 * k3V + 49/176 * k4V - 5103/18656 * k5V
         P6 = P + 9017/3168 * k1P - 355/33 * k2P + 46732/5247 * k3P + 49/176 * k4P - 5103/18656 * k5P
-        rho6 = mdot[i]/(A6 * V6)
+        rho6 = mdot_Current/(A6 * V6)
         T6 = P6/(rho6 * R)
         cp6 = CpNasa(T6)
         a6 = soS(T6)
         M6 = mNum(V6,a6)
-        k6V = h * dVdX(V6,A6,M6,cp6,T6,dAdx(x6),dHtdx6,mdot[i],delMdotdx(mdot[i],mdot[i-1],x6,x1),Dh(x6), Cf)
-        k6P = h * dPdX(P6,V6,A6,M6,cp6,T6,dAdx(x6),dHtdx6,mdot[i],delMdotdx(mdot[i],mdot[i-1],x6,x1),Dh(x6), Cf)
+        k6V = h * dVdX(V6,A6,M6,cp6,T6,dAdx(x6),dHtdx6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Dh(x6), Cf)
+        k6P = h * dPdX(P6,V6,A6,M6,cp6,T6,dAdx(x6),dHtdx6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Dh(x6), Cf)
 
         #5th order solution 
         v_5Order = V + 35/384 * k1V + 500/1113 * k3V + 125/192 * k4V - 2187/6784 * k5V + 11/84 * k6V
@@ -540,13 +451,13 @@ def rk45Step(V,P,Cf, h, i, tol = 1e-6):
         A7 = Area(x7)
         V7 = v_5Order
         P7 = p_5Order
-        rho7 = mdot[i]/(A7 * V7)
+        rho7 = mdot_Current/(A7 * V7)
         T7 = P7/(rho7 * R)
         cp7 = CpNasa(T7)
         a7 = soS(T7)
         M7 = mNum(V7,a7)
-        k7V = h * dVdX(V7,A7,M7,cp7,T7,dAdx(x7),dHtdx7,mdot[i],delMdotdx(mdot[i],mdot[i-1],x7,x1),Dh(x7), Cf)
-        k7P = h * dPdX(P7,V7,A7,M7,cp7,T7,dAdx(x7),dHtdx7,mdot[i],delMdotdx(mdot[i],mdot[i-1],x7,x1),Dh(x7), Cf)
+        k7V = h * dVdX(V7,A7,M7,cp7,T7,dAdx(x7),dHtdx7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Dh(x7), Cf)
+        k7P = h * dPdX(P7,V7,A7,M7,cp7,T7,dAdx(x7),dHtdx7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Dh(x7), Cf)
 
         #4th order solution
         v_4Order = V + 5179/57600 * k1V + 7571/16695 * k3V + 393/640 * k4V - 92097/339200 * k5V + 187/2100 * k6V + 1/40 * k7V
@@ -555,8 +466,8 @@ def rk45Step(V,P,Cf, h, i, tol = 1e-6):
         #error estimate 
         errorV = abs(v_5Order - v_4Order)
         errorP = abs(p_5Order - p_4Order)
-
-        if errorV > tol or errorP > tol: #comparing error if either error are > than tol it means that step is too big so i am making it smaller 
+        err = max(errorV, errorP)
+        if errorV > V * tol or errorP > P * tol: #comparing error if either error are > than tol it means that step is too big so i am making it smaller 
             accepted = False 
             Vnext,Pnext = V, P
             xNext = x1
@@ -569,7 +480,9 @@ def rk45Step(V,P,Cf, h, i, tol = 1e-6):
             Vnext, Pnext = v_5Order, p_5Order
             xNext = x1 + h
             s = 2
-            
+        if err == 0:
+            s = 2
+
         hUpdated = s * h
         h = hUpdated
     
@@ -577,36 +490,37 @@ def rk45Step(V,P,Cf, h, i, tol = 1e-6):
 
 # Solving/Defining inital conditons for the preburner inlet - initializing arrays to store values etc
 
-def rho_InitialValues(ui,Ti): #finding the rest of the initial values for the preburner inlet
-    rho = mdot_i/(A_CV_END * ui)
-    return rho
-
 #consecutive solves
-
 def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2_guess_B, numSolves, Cf):
-    global mdot,Vinj #making them global so that i can use them in rk4 and ode functions
-    
+    global mdot,Vinj #making them global so that i can use them in rk45 and ode functions
+    Vinj = 0
+
     u_InjA_2, T_InjA_2 = InjA_Loss_CV(pstagA_2, u2_guess_A, T2_guess_A)
     u_InjB_2, T_InjB_2 = InjB_Loss_CV(pstagB_2, u2_guess_B, T2_guess_B)
 
-    u_preburner_guess = (u_InjA_2 * A_A + u_InjB_2 * A3)/(A_CV_END)
+    u_preburner_guess = (u_InjA_2 * A_airInjs + u_InjB_2 * A_H2Injs)/(A_CV_END)
     T_preburner_guess = (T_InjA_2 * mdotA + T_InjB_2 * mdotB)/(mdot_i)
 
     u_preburner, T_preburner = CV_toPreburner(u_preburner_guess, T_preburner_guess, u_InjA_2, u_InjB_2, T_InjA_2, T_InjB_2)
-    rho_preburner = rho_InitialValues(u_preburner, T_preburner)
-    M_Preburner_Inlet = u_preburner/np.sqrt(gamma(T_preburner) * R * T_preburner) 
+    M_Preburner_Inlet = u_preburner/np.sqrt(gamma(T_preburner) * R * T_preburner)
+    
     Tstag_Preburner = temperatureStagFunc(T_preburner, M_Preburner_Inlet)
 
-    Pstag_Preburner = 12*pstagA_2
+    Pstag_Preburner = pstagA_2 #*12
 
     P_preburner = (1 + (gamma(T_preburner) - 1)/2 * M_Preburner_Inlet**2)**(-gamma(T_preburner)/(gamma(T_preburner)-1)) * Pstag_Preburner
+    rho_preburner = P_preburner/(R * T_preburner)
+
     mdot_preburner = rho_preburner * u_preburner * A_CV_END
     
     #print("Preburner Mach Number:", M_Preburner_Inlet)
-    #print("Preburner Pressure:", P_preburner * 1e-6, "MPa")
-   # print("Preburner Temperature:", T_preburner)
-    #print("Preburner velocity:", u_preburner)
-    
+    print("Preburner Pressure:", P_preburner * 1e-6, "MPa")
+    print("Preburner Temperature:", T_preburner)
+    print("Preburner velocity:", u_preburner)
+    print("Preburner rho", rho_preburner)
+    print("Imposed mdot", mdot_i, "solved mdot", mdot_preburner)
+
+
     temp = [T_preburner]                # creating fresh arrays in function 
     velocities = [u_preburner]
     pressure = [P_preburner]
@@ -618,65 +532,49 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     dAdxList = [0.0]
     areaRatio = [1.0]
 
+    xList = [0.0] #this list starts at the preburner 
+    stepList = [L_tochoke/1000]
+    mdotList = [mdot_i]
+    
     gas = ct.Solution('gri30.yaml')
     gas.TPX = T_preburner, P_preburner, {'N2': 1.0}
     sInitial = gas.entropy_mass
     entropy = [sInitial]
 
-    mdot = np.full(len(xList_rk45), mdot_i)
-    mdotReconsturcted = [] #recontruction array to check if calcs are correct 
-    mdotReconsturcted.append(mdot_i) 
 
-   # Creating Injector Array and Adding Mass Flow from Injector to global mdot array 
-    Vinj = 0 # m/s speed of N2 being injected (alr converted to x direction)
-    Dinj = 0.003175 #m Injector diameter
-    Ainj = np.pi * (Dinj/2)**2 #m^2 
-    injMdot = rho_preburner * Vinj * Ainj #kg/s
-
-    x_injLocation = 0.15 * L_tochoke #m
-    injIndex = int(x_injLocation/dx) #index of the center of the injector 
-    injIndexRange = int((Dinj/2)/dx) #range is +- so this is only half of total inj diameter
-    inj_array = np.zeros(len(xList_rk45)) #array to hold injector locations (0 means no injector 1 means injector, 2 means post injector)
-
-    startInj = max(0, int(injIndex - injIndexRange)) #start index of injector
-    endInj = min(len(xList_rk45)-1, int(injIndex + injIndexRange)) #end index of injector
-    inj_array[startInj:endInj+1] = 1 #mark injector location, +1 to include end index
-    inj_array[endInj+1:] = 2    #mark post injector locations +1 to start 1 after that end index #going to go over wtf this means 
-
-    mdot[startInj:endInj+1] = mdot_i + injMdot #add injector mass flow to main flow at injector location
-    mdot[endInj+1:] = mdot_i + injMdot #post injector mass flow
+    mdotReconstructed = [mdot_preburner] #recontruction array to check if calcs are correct 
 
     #solving flow through Preburner
-    for i in range(1, numSteps_rk45): #actual for loop for solving everything. 
+    
+    while (xList[-1] < L_tochoke *.0005): #actual for loop for solving everything. 
 
-        xCurrent = xList_rk45[i]      
-        mdotlocal = mdot[i]
-        h = h_rk45[i-1] #from step 0 to step 1 and then step 1 to step 2 etc 
+        xCurrent = xList[-1]     
+        hCurrent = stepList[-1] #from step 0 to step 1 and then step 1 to step 2 etc 
         
-        localAreaCurrent = Area(xCurrent)
-        areaList.append(localAreaCurrent)
+        Vbefore = velocities[-1]
+        Pbefore = pressure[-1]
+        Tbefore = temp [-1]
 
-        areaRatio.append(Area(0)/localAreaCurrent)
+        print("Vbefore", Vbefore, "Pbefore", Pbefore * 1e-6, "Tbefore", Tbefore)
+        xNext, VCurrent, PCurrent, hNext, accepted = rk45Step(Vbefore,Pbefore, Cf,hCurrent, xCurrent)
+      
+        xList.append(xNext)
+        xCurrent = xList[-1]
 
-        dAdXCurrent = dAdx(xCurrent)
-        dAdxList.append(dAdXCurrent)
-        
-        Vbefore = velocities[i-1]
-        Pbefore = pressure[i-1]
-        xNext, VCurrent, PCurrent, hNext, accepted = rk45Step(Vbefore,Pbefore, Cf,h,i)
-        xList_rk45[i+1] = xNext
-        h_rk45[i] = hNext
+        mdotlocal = mdotFuncX(xCurrent)
+        stepList.append(hNext)
 
         velocities.append(VCurrent)
         pressure.append(PCurrent)
 
-        rhoCurrent = mdotlocal/(Area(xList_rk45[i]) * VCurrent) 
+        rhoCurrent = mdotlocal/(Area(xCurrent) * VCurrent) 
         density.append(rhoCurrent)
 
         TCurrent = PCurrent/(rhoCurrent * R)
         temp.append(TCurrent)
 
-        mdotReconsturcted.append(rhoCurrent * VCurrent * localAreaCurrent)
+        mdotReconstructed.append(rhoCurrent * VCurrent * Area(xCurrent))
+        mdotList.append(mdotFuncX(xCurrent))
 
         aCurrent = soS(TCurrent)
         MCurrent = mNum(VCurrent,aCurrent)
@@ -691,7 +589,13 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
         gas.TP = TCurrent, PCurrent
         sCurrent = gas.entropy_mass
         entropy.append(sCurrent)
-        
+       
+        print("#################################################")
+        print("V:", Vbefore, "->", VCurrent)
+        print("P:", Pbefore * 1e-6, "->", PCurrent * 1e-6)
+        print("T:", TCurrent)
+        print("Rho:", rhoCurrent)
+
         if MCurrent >= 0.99:
             print("choked at x = ", xCurrent)
             break
@@ -706,12 +610,13 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     AreaRatio_List = np.array(areaRatio)
     pStag_List = np.array(pStag)
     tStag_List = np.array(tStag)
-    x_used_List = np.array(xList_rk45[:len(V_List)])
+    x_used_List = np.array(xList[:len(V_List)])
     Area_List = np.array(areaList)
     dAdx_List = np.array(dAdxList)
 
-    mdot_List = np.array(mdot[:len(x_used_List)])
-    mdotReconsturcted_List = np.array(mdotReconsturcted)
+    
+    mdotReconsturcted_List = np.array(mdotReconstructed)
+    mdot_List = mdotList
     entropy_List = np.array(entropy)
     
     choked_mdot = choked_massFlow(pStag_List[-1], T_List[-1], Astar, tStag_List[-1])
@@ -744,6 +649,36 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     }
 n_solves = 1 #number of solves. 
 results = consecutive_solves(PstagA, PstagB, uA, TA, uB, TB, n_solves, 0.005)
+'''
+plt.figure()
+plt.plot(results["x"],results["mdot"], label = "Imposed Mdot")
+plt.plot(results["x"],results["mdot_reconstructed"], label = "Reconstructed Mdot")
+plt.xlabel("X (m)")
+plt.ylabel("Mdot (kg/s)")
+plt.legend()
+plt.grid()
+
+
+plt.figure()
+plt.plot(results["x"],results["mach_number"])
+plt.xlabel("X (m)")
+plt.ylabel("Mach Num ")
+plt.grid()
+
+
+plt.figure()
+plt.plot(results["x"],results["temperature"])
+plt.xlabel("X (m)")
+plt.ylabel("temperature ")
+plt.grid()
+
+plt.figure()
+plt.plot(results["x"],results["pressure"])
+plt.xlabel("X (m)")
+plt.ylabel("pressure ")
+plt.grid()
+plt.show()
+'''
 
 imposed_Mdot = mdot_i #m
 
@@ -807,6 +742,7 @@ plt.xlabel("Pipe Friction Factor (Cf)")
 plt.ylabel("Density")
 plt.legend()
 plt.show()
+
 
 #function to basically sweep through a bunch of diff scales to see if I can find a good bracket for bisection method
 
@@ -1020,5 +956,23 @@ plt.grid()
 plt.show()
 '''
 
+# Creating Injector Array and Adding Mass Flow from Injector to global mdot array 
+'''
+Vinj = 0 # m/s speed of N2 being injected (alr converted to x direction)
+Dinj = 0.003175 #m Injector diameter
+Ainj = np.pi * (Dinj/2)**2 #m^2 
+injMdot = rho_preburner * Vinj * Ainj #kg/s
 
 
+injIndex = int(x_injLocation/dx) #index of the center of the injector 
+injIndexRange = int((Dinj/2)/dx) #range is +- so this is only half of total inj diameter
+inj_array = np.zeros(len(xList_rk45)) #array to hold injector locations (0 means no injector 1 means injector, 2 means post injector)
+
+startInj = max(0, int(injIndex - injIndexRange)) #start index of injector
+endInj = min(len(xList_rk45)-1, int(injIndex + injIndexRange)) #end index of injector
+inj_array[startInj:endInj+1] = 1 #mark injector location, +1 to include end index
+inj_array[endInj+1:] = 2    #mark post injector locations +1 to start 1 after that end index #going to go over wtf this means 
+
+mdot[startInj:endInj+1] = mdot_i + injMdot #add injector mass flow to main flow at injector location
+mdot[endInj+1:] = mdot_i + injMdot #post injector mass flow
+'''
