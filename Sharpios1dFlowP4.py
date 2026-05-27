@@ -4,10 +4,7 @@ from scipy.optimize import fsolve
 import cantera as ct
 from scipy import stats
 
-#preburner inlet conditions 
 R = 296.8 #J/kgK
-L_tochoke = 0.5 #m 
-L_total = 0.7   #m
 f_darcy = 0.02
 Cf = f_darcy/4
 gamma0 = 1.4
@@ -15,21 +12,20 @@ gamma0 = 1.4
 Vinj = None 
 injMdot = 0
 
-r0 = 0.05 #m
-D0 = 2 * r0
-A0 = np.pi * r0**2
-Astar = A0/25
-rStar = np.sqrt(Astar/np.pi)
-r_exit = r0
+#geometry 
+preburner_area = 45e-3 * 45e-3 #m2 
+preburner_length = 0.42 #m
 
-x1_conv = 0.5 * L_tochoke #defining range where the area starts to converge 
-x2_conv = L_tochoke #where convergence ends and area is minimum
-x_injLocation = 0.15 * L_tochoke #m
+nozzle_area_ratio = 25 
+conv_Nozzle_length = 0.08 #m 
+div_Nozzle_length = 0.140 #m
 
+throat_loc = preburner_length + conv_Nozzle_length
+nozzle_exit = throat_loc + div_Nozzle_length
+throat_Area = preburner_area / nozzle_area_ratio
+exit_Area = preburner_area
+x_injLocation = 0.15 * preburner_length #m
 
-
-x1_div = L_tochoke #defining range where area starts to diverge
-x2_div = L_total
 
 def smoothstep(xi):
     return 6*xi**5 - 15*xi**4 + 10*xi**3
@@ -37,43 +33,56 @@ def smoothstep(xi):
 def dsmoothstep_dxi(xi):
     return 30*xi**4 - 60*xi**3 + 30*xi**2
 
-def radius(x):
-    if x <= x1_conv: #constant area section before convergence starts
-        return r0
-    elif x <= x2_conv: #converging section 
-        xi = (x - x1_conv) / (x2_conv - x1_conv)
+def geometry_regions(x):
+    if x <= preburner_length:
+        return "Preburner"
+    elif throat_loc - 0.005 <= x <= throat_loc + 0.005: 
+        return "Throat"
+    elif x <= throat_loc:
+        return "Conv Nozzle"
+    elif x <= nozzle_exit:
+        return "Div Nozzle"
+    else:
+        return "outside"
 
-        return r0 - (r0 - rStar) * smoothstep(xi)
+def geom_Area(x):
+    if x <= preburner_length:
+        return preburner_area
+    elif x <= throat_loc:
+        xi = (x - preburner_length)/conv_Nozzle_length
+        return preburner_area + smoothstep(xi) * (throat_Area - preburner_area)
+    elif x <= nozzle_exit:
+        xi = (x - throat_loc)/(div_Nozzle_length)
+        return throat_Area + smoothstep(xi) * (exit_Area - throat_Area)
+    else:
+        return exit_Area
     
-    elif x <= x2_div: #diverging section
-        xi = (x - x1_div) / (x2_div - x1_div)
-        return rStar + (r_exit - rStar) * smoothstep(xi)
-    else:
-        return r_exit
-
-def Area(x):
-    r = radius(x)
-    return np.pi * r**2
-
 def Dh(x):
-    return 2 * radius(x)
+    return np.sqrt(geom_Area(x))
 
-def dAdx(x):
-    if x < x1_conv:
+def dAdx(x, tol = 1e-3):
+    if geometry_regions(x) == "Preburner":
         return 0.0
-    elif x <= x2_conv:
-        xi = (x - x1_conv) / (x2_conv - x1_conv)
-        drdx = -(r0 - rStar) * dsmoothstep_dxi(xi) / (x2_conv - x1_conv)
-        r = radius(x)
-        return 2 * np.pi * r * drdx
-    elif x <= x2_div:
-        xi = (x - x1_div) / (x2_div - x1_div)
-        drdx = (r_exit - rStar) * dsmoothstep_dxi(xi) / (x2_div - x1_div)
-        r = radius(x)
-        return 2 * np.pi * r * drdx
+    elif geometry_regions(x) == "Throat":
+        xCurrent = x
+        xPrev = x - (x*tol)
+        dA = geom_Area(xCurrent) - geom_Area(xPrev)
+        return dA/(xCurrent - xPrev)
+    
+    elif geometry_regions(x) == "Conv Nozzle":
+        xCurrent = x
+        xPrev = x - (x*tol)
+        dA = geom_Area(xCurrent) - geom_Area(xPrev)
+        return dA/(xCurrent - xPrev)
+    
+    elif geometry_regions(x) == "Div Nozzle":
+        xCurrent = x
+        xPrev = x - (x*tol)
+        dA = geom_Area(xCurrent) - geom_Area(xPrev)
+        return dA/(xCurrent - xPrev)
     else:
         return 0.0
-
+    
 def mNum(v,a): #mach number 
     M = v/a
     return M
@@ -83,43 +92,44 @@ def soS(T): #solving for a using variable gamma and Cp
     return a
 
 #dhtdx profile
-qtotal = 200e3
+qtotal =1e5
 x_s = 0
 
 def dHtdx(x):#dht/dx profile - quadtratic Ht
-    return (qtotal/L_tochoke) * (x - x_s)
+    return (qtotal/preburner_length) * (x - x_s)
 
 # Nasa Polynomials
-
 def CpNasa(T): #solving variable Cp with NASA polynomials for N2 
     return (0.02926640*10**2 + 0.14879768E-02 * T - 0.05684760E-05 * T**2 + 0.10097038E-09 * T**3 - 0.06753351E-13 * T**4) * R
 
 def gamma(T):#solving for gamma using 
-    SHC = CpNasa(T) / (CpNasa(T) - R)
-    return SHC
+    return CpNasa(T) / (CpNasa(T) - R)
      
 def hTNasa(T): #solving for static enthalpy using NASA polynomials for N2
     return (0.02926640*10**2 + (0.14879768E-02 * T)/2 - (0.05684760E-05 * T**2)/3 + (0.10097038E-09 * T**3)/4 - (0.06753351E-13 * T**4)/5) * R * T
 
+
+def residualT(T_new,T_old,xOld,uOld,uNew,dx):
+
+    ht_old = hTNasa(T_old)
+    ht_new = hTNasa(T_new)
+    term1 = (ht_new - ht_old)
+    term2 = (uNew**2 - uOld**2)/2
+    term3 = dHtdx(xOld) * dx
+
+    return term1 + term2 - term3
+
 #initial conditions and mixing solver  
-d1 = 0.25#in
-d2 = d1
-d3 = 0.25
 
-r1 = d1 / 2
-r2 = r1
-r3 = d3 / 2
 
-A1 = (r1/39.37)**2 * np.pi #m^2
-A2 = (r2/39.37)**2 * np.pi #m^2
-A3 = (r3/39.37)**2 * np.pi #m^2
-A_A = A1 + A2 #m^2
-A_airInjs = 3 * A_A
-A_H2Injs = 3 * A3
+total_Injector_Area = preburner_area * 0.2
 
-P1 = 20*1e6 #Pa
-P2 = 20*1e6 #Pa
-P3 = 20*1e6 #Pa
+A_airInjs = total_Injector_Area * 0.7
+A_H2Injs = total_Injector_Area * 0.3
+
+P1 = 12*1e6 #Pa
+P2 = 12*1e6 #Pa
+P3 = 12*1e6 #Pa
 PA = P1 #Pa. Pa is equal to P1 and P2 because they are the same injector and they are connected to the same plenum.
 PB = P3 #Pa
 
@@ -138,28 +148,38 @@ a3 = soS(TB)
 uA = M1 * a1
 uA_2 = M2 * a2
 uB = M3 * a3
-
-TstagA = TA * (1 + (gamma(TA) - 1)/2 * M1**2)
-TstagB = TB * (1 + (gamma(TB) - 1)/2 * M3**2)
+print("PA",PA*1e-6," uA", uA)
+TstagA = TA * (1 + ((gamma(TA) - 1)/2) * M1**2)
+TstagB = TB * (1 + ((gamma(TB) - 1)/2) * M3**2)
 
 PstagA = PA * (1 + (gamma(TA) - 1)/2 * M1**2)**(gamma(TA)/(gamma(TA)-1))
 PstagB = PB * (1 + (gamma(TB) - 1)/2 * M3**2)**(gamma(TB)/(gamma(TB)-1))
 
-rho1 = P1/(R*TA) #will have to define R for diff species etc - but for now they are all the same
-rho2 = P2/(R*TA_2)
-rho3 = P3/(R*TB)
+'''
+rho1 = P1/(R * TA)
+rho2 = P2/(R * TA_2)
+rho3 = P3/(R * TB)
 
-print("rho1", rho1)
 
 mdot1 = rho1 * A_airInjs * uA
 mdot2 = rho2 * A_airInjs * uA_2
 mdot3 = rho3 * A_H2Injs * uB
 
+'''
+mdot1 = 0.35
+mdot2 = 0.35
+mdot3 = 0.012
+
+rho1 = mdot1/(A_airInjs * uA)
+rho2 = mdot2/(A_airInjs * uA_2)
+rho3 = mdot3/(A_H2Injs * uB)
+
 mdotA = mdot1 + mdot2 #injector 1 and 2 are the same so can just add them together
 mdotB = mdot3 #big injector
 mdot_i = mdotA + mdotB
+print("mdoti = ", mdot_i)
 
-A_CV_END = A0 #area at the end of the CV is the same as the area at the start of the preburner inlet.
+A_CV_END = preburner_area #area at the end of the CV is the same as the area at the start of the preburner inlet.
 def delMdotdx(mdotn1, mdotn,x1,x): #dmdot/dx function
     return (mdotn1 - mdotn)/(x1-x)
 
@@ -206,8 +226,6 @@ def pstag_predicted(mdot,T,Astar,Tstag):
     Pstag_pred = mdot * (np.sqrt(Tstag)/Astar) / (np.sqrt(gamma(T) / R) * ((gamma(T) + 1)/2)**(-(gamma(T) + 1)/(2*(gamma(T)-1))))
     return Pstag_pred
 
-
-
 def E1_CV(ui,Ti,uA,uB,TA,TB):
     return ui - (mdotA/mdot_i) * uA - (mdotB/mdot_i) * uB - (mdotA * R * TA)/(mdot_i * uA) - (mdotB * R * TB)/(mdot_i * uB) + (R * Ti)/ui
 
@@ -219,9 +237,10 @@ def E2_CV(ui,Ti,uA,uB,TA,TB):
 
 def E3_InjA_CV(PstagA_2, uA_2, TA_2): #third cv equation check power point for indepth breakdown
     part1 = (PstagA_2/(R * TstagA))
-    part2 = (1 + ((gamma(TA_2) - 1)/2) * ((uA_2/soS(TA_2))**2))
-    part3 = (1 - 1*(gamma(TA_2)/(gamma(TA_2)-1)))
-    rhoA = part1 * part2**part3
+    part2_partial = ((gamma(TA_2) - 1)/2) * ((uA_2)**2)/(soS(TA_2)**2)
+    part2 = (1 + (part2_partial))
+    part3 = (1 - (gamma(TA_2)/(gamma(TA_2) - 1)))
+    rhoA = part1 * part2 **part3
     return rhoA * uA_2 * A_airInjs - mdotA
 
 def E4_InjB_CV(PstagB_2, uB_2, TB_2): #third cv equation check power point for indepth breakdown
@@ -232,11 +251,14 @@ def E4_InjB_CV(PstagB_2, uB_2, TB_2): #third cv equation check power point for i
     return rhoB * uB_2 * A_H2Injs - mdotB
 
 def E5_InjA_CV(TA_2,uA_2):
-    return TA_2 * (1 + (gamma(TA_2) - 1)/2 * (uA_2/soS(TA_2))**2) - TstagA
+    part1_partial = (((gamma(TA_2) - 1)/2) * ((uA_2)**2)/(soS(TA_2)**2))
+    part1 = (1 + part1_partial)
+    return (TA_2 * part1) - TstagA
 
 def E6_InjB_CV(TB_2,uB_2):
-    return TB_2 * (1 + (gamma(TB_2) - 1)/2 * (uB_2/soS(TB_2))**2) - TstagB
-
+    part1_partial = (((gamma(TB_2) - 1)/2) * ((uB_2)**2)/(soS(TB_2)**2))
+    part1 = (1 + part1_partial)
+    return (TB_2 * part1) - TstagB
 
 def CV_toPreburner(u2,T2,uA,uB,TA,TB): #this is newton raphson for the CV it goes from state 1 (once gasses have mixed) to state 2 (preburner inlet) 
     numIters = 0        #cut down the system of equations to 2 equations and 2 unkowns so just solving till im under tolorence 
@@ -277,45 +299,74 @@ def CV_toPreburner(u2,T2,uA,uB,TA,TB): #this is newton raphson for the CV it goe
 
     return u2, T2
 
+#the two following functions are my function where i basically seperate the injectors into 2 states.
+# state 1 is initial and state 2 is post "induced loss"
+#it is a multi var newton raphson method with damping that finds the roots - u and T - of the my two constraining equations.
+#E5 and E6 are my mass converscation equations and E3 and E4 are my energy conservation equations (just using stag temp)
+#this allows me to induce or guess a stag pressure loss pre mixing the two streams and then easily solve the two streams mixing after a loss has been applied
+#thermodynamics (energy, mass, etc) is conserved so that is the reason this works 
+
 def InjA_Loss_CV(Pstag_A2,uA_2, TA_2):
     numIters = 0
     tol = 1e-8
 
-
-    E3 = E3_InjA_CV(Pstag_A2,uA_2, TA_2)
     E5 = E5_InjA_CV(TA_2,uA_2)
+    E3 = E3_InjA_CV(Pstag_A2,uA_2, TA_2)
+
     E_vec = np.array([E5, E3])
 
     while(np.linalg.norm(E_vec, 2) >= tol and numIters <= 100):
+
         deltaU = max(abs(uA_2)*1e-6, 1e-6)
-        deltaT = max(abs(TA_2)*1e-6, 1e-6)
+        deltaT = max(abs(TA_2)*1e-6, 1e-4)
 
         #partial derivatives for numerical jacobian
         dE5du = (E5_InjA_CV(TA_2, uA_2+ deltaU) - E5)/deltaU
         dE5dT = (E5_InjA_CV(TA_2 + deltaT, uA_2) - E5)/deltaT
         dE3du = (E3_InjA_CV(Pstag_A2, uA_2 + deltaU, TA_2) - E3)/deltaU
         dE3dT = (E3_InjA_CV(Pstag_A2, uA_2, TA_2 + deltaT) - E3)/deltaT
-
+ 
         J = np.array([[dE5du, dE5dT], [dE3du, dE3dT]])
         deltas = np.linalg.solve(J, -E_vec)
+        old_norm = np.linalg.norm(E_vec, 2)
 
-        uA_2 += deltas[0]
-        TA_2 += deltas[1]
-        
-        E5 = E5_InjA_CV(TA_2, uA_2)   #updating E5 and E3 values after updating u2 and T2 to check for convergence and to move
-        E3 = E3_InjA_CV(Pstag_A2, uA_2, TA_2)   
-        E_vec = np.array([E5, E3])   
+        lamda = 1 # setting up damped newton raphson method so that I dont overshoot my initial couple steps 
+
+        while lamda > 1e-3:
+
+            uA_2Trial = uA_2 + lamda * deltas[0]
+            TA_2Trial = TA_2 + lamda * deltas[1]
+
+            if uA_2Trial <= 0 or TA_2Trial <= 0: #if statement to check to make sure i dont overstep and if i do, i dampin the step
+                lamda *=0.5
+                continue #this basically stops the code and forces it to restart at the top of the loop with an updated lamda 
+
+            E5_trial = E5_InjA_CV(TA_2Trial, uA_2Trial) #updating E5 and E3 values after updating u2 and T2 to check for convergence 
+            E3_trial = E3_InjA_CV(Pstag_A2, uA_2Trial, TA_2Trial) 
+            trial_norm = np.linalg.norm([E5_trial,E3_trial],2) #taking the L2 norm of this vector to basically get the magnitude of the residual equations  
+
+            #if i get a norm that is a number and it is smaller than my previous pre dampning norm i exit loop .
+            #if not i just make my lamda smaller
+            if np.isfinite(trial_norm) and trial_norm < old_norm: 
+                break                                               
+            
+            lamda *= 0.5
+        #updating values (u,T and residual eq and vector) from good newton step
+        uA_2 = uA_2Trial 
+        TA_2 = TA_2Trial
+        E5 = E5_trial
+        E3 = E3_trial
+        E_vec = np.array([E5, E3])
 
         numIters += 1
+
         if numIters > 100 or not np.isfinite(uA_2) or not np.isfinite(TA_2) or TA_2 <= 0:
          raise RuntimeError("InjA solve failed")
-
     return uA_2, TA_2
 
 def InjB_Loss_CV(Pstag_B2,uB_2, TB_2):
     numIters = 0
     tol = 1e-8
-
 
     E4 = E4_InjB_CV(Pstag_B2,uB_2, TB_2)
     E6 = E6_InjB_CV(TB_2,uB_2)
@@ -333,108 +384,171 @@ def InjB_Loss_CV(Pstag_B2,uB_2, TB_2):
 
         J = np.array([[dE6du, dE6dT], [dE4du, dE4dT]])
         deltas = np.linalg.solve(J, -E_vec)
+        old_norm = np.linalg.norm(E_vec, 2)
 
-        uB_2 += deltas[0]
-        TB_2 += deltas[1]
+        lamda = 1 # same as for inj A loss cv. just my dampning factor
 
-        E6 = E6_InjB_CV(TB_2, uB_2)   #updating E6 and E4 values after updating uB_2 and B_2 to check for convergence and to move
-        E4 = E4_InjB_CV(Pstag_B2, uB_2, TB_2)   
-        E_vec = np.array([E6, E4])   
-        
+        while lamda > 1e-3:
+
+            uB_2Trial = uB_2 + lamda * deltas[0]
+            TB_2Trial = TB_2 + lamda * deltas[1]
+
+            if uB_2Trial <= 0 or TB_2Trial <= 0: #if statement to check to make sure i dont overstep and if i do, i dampin the step
+                lamda *=0.5
+                continue #this basically stops the code and forces it to restart at the top of the loop with an updated lamda 
+
+            E6_trial = E6_InjB_CV(TB_2Trial, uB_2Trial) #updating E6 and E4 values after updating u2 and T2 to check for convergence 
+            E4_trial = E4_InjB_CV(Pstag_B2, uB_2Trial, TB_2Trial) 
+            trial_norm = np.linalg.norm([E6_trial,E4_trial],2) #taking the L2 norm of this vector to basically get the magnitude of the residual equations  
+
+            #if i get a norm that is a number and it is smaller than my previous pre dampning norm i exit loop .
+            #if not i just make my lamda smaller
+            if np.isfinite(trial_norm) and trial_norm < old_norm: 
+                break                                               
+            
+            lamda *= 0.5
+        #updating values (u,T and residual eq and vector) from good newton step
+        uB_2 = uB_2Trial 
+        TB_2 = TB_2Trial
+        E6 = E6_trial
+        E4 = E4_trial
+        E_vec = np.array([E6, E4])
+
 
         numIters += 1
 
         if numIters > 100 or not np.isfinite(uB_2) or not np.isfinite(TB_2) or TB_2 <= 0:
          raise RuntimeError("InjB solve failed")
-    
+        
     return uB_2, TB_2
 
+def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx):
+    numIters = 0
+    tol = 1e-8
+    E = residualT(T_Guess, T_old, xOld, uOld, uNew, dx)
+
+    while abs(E) >= tol and numIters <= 100:
+        deltaT = max(abs(T_Guess)*1e-6, 1e-6)
+        dEdT = (residualT(T_Guess + deltaT, T_old, xOld, uOld, uNew, dx) - E)/deltaT
+
+        if not np.isfinite(dEdT) or abs(dEdT) < 1e-14:
+            raise RuntimeError("Bad temperature Newton derivative")
+
+        lamda = 1.0
+        accepted = False
+
+        while lamda > 1e-3:
+            T_new = T_Guess - lamda * E/dEdT
+
+            if T_new <= 0 or not np.isfinite(T_new) or T_new > 3*T_old:
+                lamda *= 0.5
+                continue
+
+            E_new = residualT(T_new, T_old, xOld, uOld, uNew, dx)
+
+            if np.isfinite(E_new) and abs(E_new) < abs(E):
+                accepted = True
+                break
+
+            lamda *= 0.5
+
+        if not accepted:
+            raise RuntimeError("damping for temp Newton Raphson failed")    
+        
+        T_Guess = T_new
+        E = E_new
+        numIters += 1
+
+    if numIters > 100 or not np.isfinite(T_Guess) or T_Guess <= 0:
+        raise RuntimeError("Newton-Raphson solve failed")
+
+    return T_Guess
 
 #rk45
-def rk45Step(V,P,Cf, h, x): #add stages for each mdot 
+
+#LEAVING OFF HERE FOR TODAY. just take a look at gpt notes, and ipad notes 
+#basically just trying to figure out a way to constraint T so that when im doing rk45 it does not spike a lot and stuff. 
+def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
     accepted = False 
     tol = 1e-6
+    h = min(h, 1e-4)
+    
     while (accepted != True):
         mdot_Current = mdotFuncX(x)
         mdot_Prev = mdotFuncX(x-h)
-
         x1 = x
         dHtdx1 = dHtdx(x1)
-        A1 = Area(x1)
-        print("A1", A1)
+        A1 = geom_Area(x1)
         V1 = V
         P1 =  P
-        rho1 = mdot_Current/(A1 * V1)
-        T1 = P1/(rho1 * R)
+        T1 = T_preburner
+
         cp1 = CpNasa(T1)
         a1 = soS(T1)
         M1 = mNum(V1,a1)
         k1V = h * dVdX(V1,A1,M1,cp1,T1,dAdx(x1),dHtdx1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Dh(x1), Cf)
         k1P = h * dPdX(P1,V1,A1,M1,cp1,T1,dAdx(x1),dHtdx1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Dh(x1), Cf)
-        print("V1", V1, "P1", P1,"T1", T1, "rho1", rho1)
+        #print("T1", T1)
 
         x2 = x1 + 1/5 * h
         dHtdx2 = dHtdx(x2)
-        A2 = Area(x2)
+        A2 = geom_Area(x2)
         V2 = V + 1/5 * k1V 
         P2 = P + 1/5 * k1P
-
-        rho2 = mdot_Current/(A2 * V2)
-        T2 = P2/(rho2 * R)
+        #T_old,T_new,xOld,xNew,uOld,uNew,dx
+        T2 = newtonRaphson_T(T1, T1, x1, V1, V2, 1/5 * h) 
         cp2 = CpNasa(T2)
         a2 = soS(T2)
         M2 = mNum(V2,a2)
         k2V = h * dVdX(V2,A2,M2,cp2,T2,dAdx(x2),dHtdx2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Dh(x2), Cf)
         k2P = h * dPdX(P2,V2,A2,M2,cp2,T2,dAdx(x2),dHtdx2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Dh(x2), Cf)
-        print("V2", V2, "P2", P2,"T2", T2)
-
+        #print("T2", T2)
 
         x3 = x1 + 3/10 * h
         dHtdx3 = dHtdx(x3)
-        A3 = Area(x3)
+        A3 = geom_Area(x3)
         V3 = V + 3/40 * k1V + 9/40 * k2V
         P3 = P + 3/40 * k1P + 9/40 * k2P
-        rho3 = mdot_Current/(A3 * V3)
-        T3 = P3/(rho3 * R)
+        T3 = newtonRaphson_T(T1, T1, x1, V1, V3, 3/10 * h) 
         cp3 = CpNasa(T3)
         a3 = soS(T3)
         M3 = mNum(V3,a3)
         k3V = h * dVdX(V3,A3,M3,cp3,T3,dAdx(x3),dHtdx3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Dh(x3), Cf)
         k3P = h * dPdX(P3,V3,A3,M3,cp3,T3,dAdx(x3),dHtdx3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Dh(x3), Cf)
-      
+        #print("T3", T3)
+
         x4 = x1 + 4/5 * h
         dHtdx4 = dHtdx(x4)
-        A4 = Area(x4)
+        A4 = geom_Area(x4)
         V4 = V + 44/45 * k1V - 56/15 * k2V + 32/9 * k3V
         P4 = P + 44/45 * k1P - 56/15 * k2P + 32/9 * k3P
-        rho4 = mdot_Current/(A4 * V4)
-        T4 = P4/(rho4 * R)
+        T4 = newtonRaphson_T(T1, T1, x1, V1, V4, 4/5 * h) 
         cp4 = CpNasa(T4)
         a4 = soS(T4)
         M4 = mNum(V4,a4)
         k4V = h * dVdX(V4,A4,M4,cp4,T4,dAdx(x4),dHtdx4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Dh(x4), Cf)
         k4P = h * dPdX(P4,V4,A4,M4,cp4,T4,dAdx(x4),dHtdx4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Dh(x4), Cf)
+        #print("T4", T4)
 
         x5 = x1 + 8/9 * h
         dHtdx5 = dHtdx(x5)
-        A5 = Area(x5)
+        A5 = geom_Area(x5)
         V5 = V + 19372/6561 * k1V - 25360/2187 * k2V + 64448/6561 * k3V - 212/729 * k4V
         P5 = P + 19372/6561 * k1P - 25360/2187 * k2P + 64448/6561 * k3P - 212/729 * k4P
-        rho5 = mdot_Current/(A5 * V5)
-        T5 = P5/(rho5 * R)
+        T5 = newtonRaphson_T(T1, T1, x1, V1, V5, 8/9 * h)
         cp5 = CpNasa(T5)
         a5 = soS(T5)
         M5 = mNum(V5,a5)
         k5V = h * dVdX(V5,A5,M5,cp5,T5,dAdx(x5),dHtdx5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Dh(x5), Cf)
         k5P = h * dPdX(P5,V5,A5,M5,cp5,T5,dAdx(x5),dHtdx5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Dh(x5), Cf)
+        #print("T5", T5)
 
         x6 = x1 + h
         dHtdx6 = dHtdx(x6)
-        A6 = Area(x6)
+        A6 = geom_Area(x6)
         V6 = V + 9017/3168 * k1V - 355/33 * k2V + 46732/5247 * k3V + 49/176 * k4V - 5103/18656 * k5V
         P6 = P + 9017/3168 * k1P - 355/33 * k2P + 46732/5247 * k3P + 49/176 * k4P - 5103/18656 * k5P
-        rho6 = mdot_Current/(A6 * V6)
-        T6 = P6/(rho6 * R)
+        T6 = newtonRaphson_T(T1, T1, x1, V1, V6, 1 * h)
         cp6 = CpNasa(T6)
         a6 = soS(T6)
         M6 = mNum(V6,a6)
@@ -445,14 +559,12 @@ def rk45Step(V,P,Cf, h, x): #add stages for each mdot
         v_5Order = V + 35/384 * k1V + 500/1113 * k3V + 125/192 * k4V - 2187/6784 * k5V + 11/84 * k6V
         p_5Order = P + 35/384 * k1P + 500/1113 * k3P + 125/192 * k4P - 2187/6784 * k5P + 11/84 * k6P
 
-
         x7 = x1 + h
         dHtdx7 = dHtdx(x7)
-        A7 = Area(x7)
+        A7 = geom_Area(x7)
         V7 = v_5Order
         P7 = p_5Order
-        rho7 = mdot_Current/(A7 * V7)
-        T7 = P7/(rho7 * R)
+        T7 = newtonRaphson_T(T1, T1, x1, V1, V7, 1 * h)
         cp7 = CpNasa(T7)
         a7 = soS(T7)
         M7 = mNum(V7,a7)
@@ -467,26 +579,29 @@ def rk45Step(V,P,Cf, h, x): #add stages for each mdot
         errorV = abs(v_5Order - v_4Order)
         errorP = abs(p_5Order - p_4Order)
         err = max(errorV, errorP)
+
         if errorV > V * tol or errorP > P * tol: #comparing error if either error are > than tol it means that step is too big so i am making it smaller 
             accepted = False 
-            Vnext,Pnext = V, P
-            xNext = x1
             sV = 0.9*(tol/errorV)**(1/5)
             sP = 0.9*(tol/errorP)**(1/5)
             s = min(sV, sP)
+            hUpdated = min(s * h, 1e-4)
+            h = hUpdated
+            continue #this just restarts the loop with the updated h value
             
         else: #if both are smaller than tol then I am accepting the time step and then making it bigger 
             accepted = True
             Vnext, Pnext = v_5Order, p_5Order
             xNext = x1 + h
+            Tnext = newtonRaphson_T(T1, T1, x1, V1, Vnext, 1 * h)
             s = 2
+
         if err == 0:
             s = 2
 
-        hUpdated = s * h
-        h = hUpdated
+        hUpdated = min(s * h, 1e-4)
     
-    return xNext, Vnext, Pnext, hUpdated, accepted
+    return xNext, Vnext, Pnext, Tnext,hUpdated, accepted
 
 # Solving/Defining inital conditons for the preburner inlet - initializing arrays to store values etc
 
@@ -502,24 +617,23 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     T_preburner_guess = (T_InjA_2 * mdotA + T_InjB_2 * mdotB)/(mdot_i)
 
     u_preburner, T_preburner = CV_toPreburner(u_preburner_guess, T_preburner_guess, u_InjA_2, u_InjB_2, T_InjA_2, T_InjB_2)
-    M_Preburner_Inlet = u_preburner/np.sqrt(gamma(T_preburner) * R * T_preburner)
+    M_Preburner_Inlet = u_preburner/soS(T_preburner)
     
     Tstag_Preburner = temperatureStagFunc(T_preburner, M_Preburner_Inlet)
 
-    Pstag_Preburner = pstagA_2 #*12
-
+    Pstag_Preburner = 1* pstagA_2
+    
     P_preburner = (1 + (gamma(T_preburner) - 1)/2 * M_Preburner_Inlet**2)**(-gamma(T_preburner)/(gamma(T_preburner)-1)) * Pstag_Preburner
-    rho_preburner = P_preburner/(R * T_preburner)
+    rho_preburner = mdot_i/(A_CV_END * u_preburner)
 
     mdot_preburner = rho_preburner * u_preburner * A_CV_END
-    
-    #print("Preburner Mach Number:", M_Preburner_Inlet)
+    '''    print("Preburner Mach Number:", M_Preburner_Inlet)
     print("Preburner Pressure:", P_preburner * 1e-6, "MPa")
     print("Preburner Temperature:", T_preburner)
     print("Preburner velocity:", u_preburner)
     print("Preburner rho", rho_preburner)
     print("Imposed mdot", mdot_i, "solved mdot", mdot_preburner)
-
+    '''
 
     temp = [T_preburner]                # creating fresh arrays in function 
     velocities = [u_preburner]
@@ -528,12 +642,12 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     tStag = [Tstag_Preburner]
     machNum = [M_Preburner_Inlet]
     density = [rho_preburner]
-    areaList = [Area(0)]
+    areaList = [geom_Area(0)]
     dAdxList = [0.0]
     areaRatio = [1.0]
 
     xList = [0.0] #this list starts at the preburner 
-    stepList = [L_tochoke/1000]
+    stepList = [preburner_length/1e4]
     mdotList = [mdot_i]
     
     gas = ct.Solution('gri30.yaml')
@@ -544,9 +658,13 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
 
     mdotReconstructed = [mdot_preburner] #recontruction array to check if calcs are correct 
 
-    #solving flow through Preburner
-    
-    while (xList[-1] < L_tochoke *.0005): #actual for loop for solving everything. 
+    throatTemp = float('nan')
+    throatTstag = float('nan')
+    throatPstag = float('nan')
+    throatMdot = float('nan')
+
+    #solving flow through Preburner   *.0005
+    while (xList[-1] < nozzle_exit ): #actual for loop for solving everything. from start of preburner to throat 
 
         xCurrent = xList[-1]     
         hCurrent = stepList[-1] #from step 0 to step 1 and then step 1 to step 2 etc 
@@ -554,10 +672,9 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
         Vbefore = velocities[-1]
         Pbefore = pressure[-1]
         Tbefore = temp [-1]
+        #print("xCurrent: ", xCurrent)
+        xNext, VCurrent, PCurrent, TCurrent, hNext, accepted = rk45Step(Vbefore,Pbefore, Cf,hCurrent, xCurrent,Tbefore)
 
-        print("Vbefore", Vbefore, "Pbefore", Pbefore * 1e-6, "Tbefore", Tbefore)
-        xNext, VCurrent, PCurrent, hNext, accepted = rk45Step(Vbefore,Pbefore, Cf,hCurrent, xCurrent)
-      
         xList.append(xNext)
         xCurrent = xList[-1]
 
@@ -567,13 +684,12 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
         velocities.append(VCurrent)
         pressure.append(PCurrent)
 
-        rhoCurrent = mdotlocal/(Area(xCurrent) * VCurrent) 
+        rhoCurrent = mdotlocal/(geom_Area(xCurrent) * VCurrent) 
         density.append(rhoCurrent)
 
-        TCurrent = PCurrent/(rhoCurrent * R)
         temp.append(TCurrent)
 
-        mdotReconstructed.append(rhoCurrent * VCurrent * Area(xCurrent))
+        mdotReconstructed.append(rhoCurrent * VCurrent * geom_Area(xCurrent))
         mdotList.append(mdotFuncX(xCurrent))
 
         aCurrent = soS(TCurrent)
@@ -589,18 +705,30 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
         gas.TP = TCurrent, PCurrent
         sCurrent = gas.entropy_mass
         entropy.append(sCurrent)
-       
+        '''
         print("#################################################")
         print("V:", Vbefore, "->", VCurrent)
         print("P:", Pbefore * 1e-6, "->", PCurrent * 1e-6)
         print("T:", TCurrent)
         print("Rho:", rhoCurrent)
+        print(accepted)
+        '''
+        if geometry_regions(xCurrent) == "Throat": #capturing throat conditions for later use so that i can couple finding my pstag scale with geometric location of the throat 
+            throatTemp = temp[-1]
+            throatTstag = tStag[-1]
+            throatPstag = pStag[-1]
+            throatMdot = mdotList[-1]
+
 
         if MCurrent >= 0.99:
             print("choked at x = ", xCurrent)
+            print("choked at region = ", geometry_regions(xCurrent))
             break
         
-        
+    if machNum[-1] <0.99:
+        print("flow did NOT CHOKE. final Mach number: ", machNum[-1])
+        print("x at end of solve: ", xList[-1])
+
     #converting to np arrays
     V_List = np.array(velocities)
     P_List = np.array(pressure)
@@ -614,13 +742,21 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     Area_List = np.array(areaList)
     dAdx_List = np.array(dAdxList)
 
-    
+
     mdotReconsturcted_List = np.array(mdotReconstructed)
     mdot_List = mdotList
     entropy_List = np.array(entropy)
-    
-    choked_mdot = choked_massFlow(pStag_List[-1], T_List[-1], Astar, tStag_List[-1])
-    StagPressure_Predicted = pstag_predicted(mdot_List[-1], T_List[-1], Astar, tStag_List[-1])
+    if np.isfinite(throatTemp) and np.isfinite(throatTstag) and np.isfinite(throatPstag) and np.isfinite(throatMdot):
+        choked_mdot = choked_massFlow(throatPstag, throatTemp, throat_Area, throatTstag)
+        StagPressure_Predicted = pstag_predicted(throatMdot, throatTemp, throat_Area, throatTstag)
+    else:
+        print("throat not reached or not captured")
+        choked_mdot = float('nan')
+        StagPressure_Predicted = float('nan')
+    #choked_mdot = choked_massFlow(pStag_List[-1], T_List[-1], throat_Area, tStag_List[-1])
+    #StagPressure_Predicted = pstag_predicted(mdot_List[-1], T_List[-1], throat_Area, tStag_List[-1])
+
+
     #print("Predicted choked Pstag: ", StagPressure_Predicted * 1e-6, "MPa")
     #print("Pstag_Preburner: ", Pstag_Preburner * 1e-6, "MPa")
 
@@ -649,6 +785,26 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     }
 n_solves = 1 #number of solves. 
 results = consecutive_solves(PstagA, PstagB, uA, TA, uB, TB, n_solves, 0.005)
+
+plt.figure()
+plt.plot(results["x"],results["mach_number"])
+plt.xlabel("X (m)")
+plt.ylabel("Mach Num ")
+plt.grid()
+
+plt.figure()
+plt.plot(results["x"],results["density"])
+plt.xlabel("X (m)")
+plt.ylabel("Density (kg/m^3)")
+plt.grid()
+
+plt.figure()
+plt.plot(results["x"],results["entropy"])
+plt.xlabel("X (m)")
+plt.ylabel("Entropy")
+plt.grid()
+plt.show()
+
 '''
 plt.figure()
 plt.plot(results["x"],results["mdot"], label = "Imposed Mdot")
@@ -658,13 +814,11 @@ plt.ylabel("Mdot (kg/s)")
 plt.legend()
 plt.grid()
 
-
 plt.figure()
 plt.plot(results["x"],results["mach_number"])
 plt.xlabel("X (m)")
 plt.ylabel("Mach Num ")
 plt.grid()
-
 
 plt.figure()
 plt.plot(results["x"],results["temperature"])
@@ -673,75 +827,32 @@ plt.ylabel("temperature ")
 plt.grid()
 
 plt.figure()
-plt.plot(results["x"],results["pressure"])
+plt.plot(results["x"],results["temperature_stag"])
 plt.xlabel("X (m)")
-plt.ylabel("pressure ")
+plt.ylabel("Stagnation Temperature ")
 plt.grid()
+
+plt.figure()
+plt.plot(results["x"],results["pressure_stag"])
+plt.xlabel("X (m)")
+plt.ylabel("Stagnation Pressure ")
+plt.grid()
+
+
+plt.figure()
+plt.plot(results["x"], results["entropy"])
+plt.xlabel("X (m)")
+plt.ylabel("Entropy")
+plt.grid()
+
 plt.show()
 '''
+
+
+#Plots
+
 
 imposed_Mdot = mdot_i #m
-
-'''
-#setting up basic mcmc model for just the friction coeff 
-def log_prior(Cf):
-    if Cf < 0:
-        return -np.inf
-    else:
-        return stats.norm.logpdf(Cf, loc=0.005, scale=0.00125) 
-    
-def log_likelihood(Cf):
-    solve = consecutive_solves(PstagA, PstagB, uA, TA, uB, TB, n_solves, Cf)
-    return np.sum(stats.norm.logpdf(imposed_Mdot, loc=solve["Choked Mdot"], scale=0.1*imposed_Mdot)) #likelihood function based on how close the choked mass flow from the solve is to the imposed mass flow, with a standard deviation of 10% of the imposed mass flow
-
-def log_posterior(Cf):
-    logPrior = log_prior(Cf)
-    if logPrior == -np.inf:
-        return -np.inf
-    logLikelihood = log_likelihood(Cf)
-    return logPrior + logLikelihood
-
-Cf_grid = np.linspace(0.003, 0.007, 100) #grid of friction coeffs to evaluate
-
-iters = 1000
-Cf_initial = 0.0025
-Cf_chain = np.zeros(iters)
-Cf_chain[0] = Cf_initial
-
-for i in range(1, iters):
-    Cf_current = Cf_chain[i-1]
-    Cf_guess = np.random.normal(Cf_current, 0.0005) #small random walk proposal distribution
-
-    log_posterior_current = log_posterior(Cf_current)
-    log_posterior_guess = log_posterior(Cf_guess)
-    acceptance_ratio = np.exp(log_posterior_guess - log_posterior_current)
-
-    if acceptance_ratio >= np.random.uniform(0, 1):
-        Cf_chain[i] = Cf_guess
-    else:
-        Cf_chain[i] = Cf_current
-
-log_posterior_values = [log_posterior(Cf) for Cf in Cf_grid]
-posterior_values = np.exp(log_posterior_values - np.max(log_posterior_values)) #subtracting max log posterior for numerical stability
-
-plt.figure()
-plt.plot(Cf_grid, posterior_values, 'o-')
-plt.xlabel("Friction Coefficient (Cf)")
-plt.ylabel("Log Posterior")
-plt.title("Log Posterior vs Friction Coefficient")
-plt.grid()
-
-plt.figure()
-plt.hist(Cf_chain, bins=50, density=True, alpha=0.6, label="MCMC samples")
-
-posterior_curve = np.exp(log_posterior_values - np.max(log_posterior_values))
-posterior_curve = posterior_curve / np.trapezoid(posterior_curve, Cf_grid)
-
-plt.plot(Cf_grid, posterior_curve, label="Posterior curve")
-plt.xlabel("Pipe Friction Factor (Cf)")
-plt.ylabel("Density")
-plt.legend()
-plt.show()
 
 
 #function to basically sweep through a bunch of diff scales to see if I can find a good bracket for bisection method
@@ -954,7 +1065,6 @@ plt.ylabel("Residual (imposed mdot - mdotChoke)")
 plt.title("Residual vs Scale")
 plt.grid()
 plt.show()
-'''
 
 # Creating Injector Array and Adding Mass Flow from Injector to global mdot array 
 '''
@@ -975,4 +1085,68 @@ inj_array[endInj+1:] = 2    #mark post injector locations +1 to start 1 after th
 
 mdot[startInj:endInj+1] = mdot_i + injMdot #add injector mass flow to main flow at injector location
 mdot[endInj+1:] = mdot_i + injMdot #post injector mass flow
+'''
+
+
+'''
+#setting up basic mcmc model for just the friction coeff 
+def log_prior(Cf):
+    if Cf < 0:
+        return -np.inf
+    else:
+        return stats.norm.logpdf(Cf, loc=0.005, scale=0.00125) 
+    
+def log_likelihood(Cf):
+    solve = consecutive_solves(PstagA, PstagB, uA, TA, uB, TB, n_solves, Cf)
+    return np.sum(stats.norm.logpdf(imposed_Mdot, loc=solve["Choked Mdot"], scale=0.1*imposed_Mdot)) #likelihood function based on how close the choked mass flow from the solve is to the imposed mass flow, with a standard deviation of 10% of the imposed mass flow
+
+def log_posterior(Cf):
+    logPrior = log_prior(Cf)
+    if logPrior == -np.inf:
+        return -np.inf
+    logLikelihood = log_likelihood(Cf)
+    return logPrior + logLikelihood
+
+Cf_grid = np.linspace(0.003, 0.007, 100) #grid of friction coeffs to evaluate
+
+iters = 1000
+Cf_initial = 0.0025
+Cf_chain = np.zeros(iters)
+Cf_chain[0] = Cf_initial
+
+for i in range(1, iters):
+    Cf_current = Cf_chain[i-1]
+    Cf_guess = np.random.normal(Cf_current, 0.0005) #small random walk proposal distribution
+
+    log_posterior_current = log_posterior(Cf_current)
+    log_posterior_guess = log_posterior(Cf_guess)
+    acceptance_ratio = np.exp(log_posterior_guess - log_posterior_current)
+
+    if acceptance_ratio >= np.random.uniform(0, 1):
+        Cf_chain[i] = Cf_guess
+    else:
+        Cf_chain[i] = Cf_current
+
+log_posterior_values = [log_posterior(Cf) for Cf in Cf_grid]
+posterior_values = np.exp(log_posterior_values - np.max(log_posterior_values)) #subtracting max log posterior for numerical stability
+
+plt.figure()
+plt.plot(Cf_grid, posterior_values, 'o-')
+plt.xlabel("Friction Coefficient (Cf)")
+plt.ylabel("Log Posterior")
+plt.title("Log Posterior vs Friction Coefficient")
+plt.grid()
+
+plt.figure()
+plt.hist(Cf_chain, bins=50, density=True, alpha=0.6, label="MCMC samples")
+
+posterior_curve = np.exp(log_posterior_values - np.max(log_posterior_values))
+posterior_curve = posterior_curve / np.trapezoid(posterior_curve, Cf_grid)
+
+plt.plot(Cf_grid, posterior_curve, label="Posterior curve")
+plt.xlabel("Pipe Friction Factor (Cf)")
+plt.ylabel("Density")
+plt.legend()
+plt.show()
+
 '''
