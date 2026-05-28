@@ -466,12 +466,12 @@ def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx):
 
 #rk45
 
-#LEAVING OFF HERE FOR TODAY. just take a look at gpt notes, and ipad notes 
-#basically just trying to figure out a way to constraint T so that when im doing rk45 it does not spike a lot and stuff. 
+#planning on optimizng rk45 and makin the minimum step size region based 
 def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
     accepted = False 
     tol = 1e-6
     h = min(h, 1e-4)
+    location = geometry_regions(x)
     
     while (accepted != True):
         mdot_Current = mdotFuncX(x)
