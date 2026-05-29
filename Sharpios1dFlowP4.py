@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.optimize import fsolve
 import cantera as ct
 from scipy import stats
+import time
 
 R = 296.8 #J/kgK
 f_darcy = 0.02
@@ -90,9 +91,35 @@ def mNum(v,a): #mach number
 def soS(T): #solving for a using variable gamma and Cp 
     a = np.sqrt(gamma(T) * R * T)
     return a
+#Species and species properties
+gas = ct.Solution('h2_air.yaml')
+print(gas.species_names)
+# Y is mass fraction for cantera 
+
+def gas_properties(T,P,Y):
+    gas.TPY = T, P, Y
+    cp = gas.cp_mass
+    h = gas.enthalpy_mass
+    gamma = gas.cp_mass/gas.cv_mass
+    R_specific = gas.cp_mass - gas.cv_mass
+    return{
+        "cp": cp,
+        "h": h,
+        "gamma": gamma,
+        "R_specific": R_specific
+
+    }
+
+def get_Y(comp_string):
+    gas.TPX = 300, 101325, comp_string
+    return gas.Y.copy()
+
+def Ymix(YA, YB):
+    Ymix = (mdotAir * YA + mdotH2 * YB)/mdot_i
+    return Ymix
 
 #dhtdx profile
-qtotal =1e5
+qtotal =1e6
 x_s = 0
 
 def dHtdx(x):#dht/dx profile - quadtratic Ht
@@ -120,16 +147,14 @@ def residualT(T_new,T_old,xOld,uOld,uNew,dx):
     return term1 + term2 - term3
 
 #initial conditions and mixing solver  
-
-
-total_Injector_Area = preburner_area * 0.2
+total_Injector_Area = preburner_area * 0.15
 
 A_airInjs = total_Injector_Area * 0.7
 A_H2Injs = total_Injector_Area * 0.3
 
-P1 = 12*1e6 #Pa
-P2 = 12*1e6 #Pa
-P3 = 12*1e6 #Pa
+P1 = 8*1e6 #Pa
+P2 = 8*1e6 #Pa
+P3 = 2*1e6 #Pa
 PA = P1 #Pa. Pa is equal to P1 and P2 because they are the same injector and they are connected to the same plenum.
 PB = P3 #Pa
 
@@ -155,29 +180,24 @@ TstagB = TB * (1 + ((gamma(TB) - 1)/2) * M3**2)
 PstagA = PA * (1 + (gamma(TA) - 1)/2 * M1**2)**(gamma(TA)/(gamma(TA)-1))
 PstagB = PB * (1 + (gamma(TB) - 1)/2 * M3**2)**(gamma(TB)/(gamma(TB)-1))
 
-'''
-rho1 = P1/(R * TA)
-rho2 = P2/(R * TA_2)
-rho3 = P3/(R * TB)
+mdot1_Air = 0.2
+mdot2_Air = 0.2
+mdot3_H2 = 0.004
+
+rho1 = mdot1_Air/(A_airInjs * uA)
+rho2 = mdot2_Air/(A_airInjs * uA_2)
+rho3 = mdot3_H2/(A_H2Injs * uB)
+
+mdotAir = mdot1_Air + mdot2_Air #injector 1 and 2 are the same so can just add them together
+mdotH2 = mdot3_H2 #big injector
+mdot_i = mdotAir + mdotH2
 
 
-mdot1 = rho1 * A_airInjs * uA
-mdot2 = rho2 * A_airInjs * uA_2
-mdot3 = rho3 * A_H2Injs * uB
+Y_air = get_Y("O2:0.21, N2:0.79")
+Y_H2 = get_Y("H2:1.0")
 
-'''
-mdot1 = 0.35
-mdot2 = 0.35
-mdot3 = 0.012
+Y_mix = Ymix(Y_air, Y_H2)
 
-rho1 = mdot1/(A_airInjs * uA)
-rho2 = mdot2/(A_airInjs * uA_2)
-rho3 = mdot3/(A_H2Injs * uB)
-
-mdotA = mdot1 + mdot2 #injector 1 and 2 are the same so can just add them together
-mdotB = mdot3 #big injector
-mdot_i = mdotA + mdotB
-print("mdoti = ", mdot_i)
 
 A_CV_END = preburner_area #area at the end of the CV is the same as the area at the start of the preburner inlet.
 def delMdotdx(mdotn1, mdotn,x1,x): #dmdot/dx function
@@ -213,6 +233,7 @@ def pressureStagFunc(P,M,T):
     gammA = gamma(T)
     Pstag = P * (1 + (gammA - 1)/2 * M**2)**(gammA/(gammA-1))
     return Pstag
+
 def temperatureStagFunc(T,M):
     gammA = gamma(T)
     Tstag = T * (1 + (gammA - 1)/2 * M**2)
@@ -227,13 +248,13 @@ def pstag_predicted(mdot,T,Astar,Tstag):
     return Pstag_pred
 
 def E1_CV(ui,Ti,uA,uB,TA,TB):
-    return ui - (mdotA/mdot_i) * uA - (mdotB/mdot_i) * uB - (mdotA * R * TA)/(mdot_i * uA) - (mdotB * R * TB)/(mdot_i * uB) + (R * Ti)/ui
+    return ui - (mdotAir/mdot_i) * uA - (mdotH2/mdot_i) * uB - (mdotAir * R * TA)/(mdot_i * uA) - (mdotH2 * R * TB)/(mdot_i * uB) + (R * Ti)/ui
 
 def E2_CV(ui,Ti,uA,uB,TA,TB):
     hi = hTNasa(Ti)
     hA = hTNasa(TA)
     hB = hTNasa(TB)
-    return (hi + ui**2/2) - (mdotA/mdot_i) * (hA + uA**2/2) - (mdotB/mdot_i) * (hB + uB**2/2)
+    return (hi + ui**2/2) - (mdotAir/mdot_i) * (hA + uA**2/2) - (mdotH2/mdot_i) * (hB + uB**2/2)
 
 def E3_InjA_CV(PstagA_2, uA_2, TA_2): #third cv equation check power point for indepth breakdown
     part1 = (PstagA_2/(R * TstagA))
@@ -241,14 +262,14 @@ def E3_InjA_CV(PstagA_2, uA_2, TA_2): #third cv equation check power point for i
     part2 = (1 + (part2_partial))
     part3 = (1 - (gamma(TA_2)/(gamma(TA_2) - 1)))
     rhoA = part1 * part2 **part3
-    return rhoA * uA_2 * A_airInjs - mdotA
+    return rhoA * uA_2 * A_airInjs - mdotAir
 
 def E4_InjB_CV(PstagB_2, uB_2, TB_2): #third cv equation check power point for indepth breakdown
     part1 = (PstagB_2/(R * TstagB))
     part2 = (1 + ((gamma(TB_2) - 1)/2) * ((uB_2/soS(TB_2))**2))
     part3 = (1 - 1*(gamma(TB_2)/(gamma(TB_2)-1)))
     rhoB = part1 * part2**part3
-    return rhoB * uB_2 * A_H2Injs - mdotB
+    return rhoB * uB_2 * A_H2Injs - mdotH2
 
 def E5_InjA_CV(TA_2,uA_2):
     part1_partial = (((gamma(TA_2) - 1)/2) * ((uA_2)**2)/(soS(TA_2)**2))
@@ -298,6 +319,10 @@ def CV_toPreburner(u2,T2,uA,uB,TA,TB): #this is newton raphson for the CV it goe
 
 
     return u2, T2
+
+
+
+#NewtonRaphson Solvers
 
 #the two following functions are my function where i basically seperate the injectors into 2 states.
 # state 1 is initial and state 2 is post "induced loss"
@@ -362,6 +387,8 @@ def InjA_Loss_CV(Pstag_A2,uA_2, TA_2):
 
         if numIters > 100 or not np.isfinite(uA_2) or not np.isfinite(TA_2) or TA_2 <= 0:
          raise RuntimeError("InjA solve failed")
+        
+    print("uA_2", uA_2, "TA_2", TA_2)
     return uA_2, TA_2
 
 def InjB_Loss_CV(Pstag_B2,uB_2, TB_2):
@@ -420,6 +447,7 @@ def InjB_Loss_CV(Pstag_B2,uB_2, TB_2):
         if numIters > 100 or not np.isfinite(uB_2) or not np.isfinite(TB_2) or TB_2 <= 0:
          raise RuntimeError("InjB solve failed")
         
+    print("uB_2", uB_2, "TB_2", TB_2)
     return uB_2, TB_2
 
 def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx):
@@ -470,9 +498,16 @@ def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx):
 def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
     accepted = False 
     tol = 1e-6
-    h = min(h, 1e-4)
     location = geometry_regions(x)
+
+    if location == "Preburner":
+        h = min(h, 1e-1)
+    elif location == "Conv Nozzle" or location == "Div Nozzle":
+        h = min(h, 1e-3)
+    elif location == "Throat":
+        h = min(h, 1e-3)
     
+
     while (accepted != True):
         mdot_Current = mdotFuncX(x)
         mdot_Prev = mdotFuncX(x-h)
@@ -614,7 +649,7 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     u_InjB_2, T_InjB_2 = InjB_Loss_CV(pstagB_2, u2_guess_B, T2_guess_B)
 
     u_preburner_guess = (u_InjA_2 * A_airInjs + u_InjB_2 * A_H2Injs)/(A_CV_END)
-    T_preburner_guess = (T_InjA_2 * mdotA + T_InjB_2 * mdotB)/(mdot_i)
+    T_preburner_guess = (T_InjA_2 * mdotAir + T_InjB_2 * mdotH2)/(mdot_i)
 
     u_preburner, T_preburner = CV_toPreburner(u_preburner_guess, T_preburner_guess, u_InjA_2, u_InjB_2, T_InjA_2, T_InjB_2)
     M_Preburner_Inlet = u_preburner/soS(T_preburner)
@@ -627,7 +662,8 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     rho_preburner = mdot_i/(A_CV_END * u_preburner)
 
     mdot_preburner = rho_preburner * u_preburner * A_CV_END
-    '''    print("Preburner Mach Number:", M_Preburner_Inlet)
+    '''
+    print("Preburner Mach Number:", M_Preburner_Inlet)
     print("Preburner Pressure:", P_preburner * 1e-6, "MPa")
     print("Preburner Temperature:", T_preburner)
     print("Preburner velocity:", u_preburner)
@@ -650,7 +686,6 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     stepList = [preburner_length/1e4]
     mdotList = [mdot_i]
     
-    gas = ct.Solution('gri30.yaml')
     gas.TPX = T_preburner, P_preburner, {'N2': 1.0}
     sInitial = gas.entropy_mass
     entropy = [sInitial]
@@ -719,7 +754,6 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
             throatPstag = pStag[-1]
             throatMdot = mdotList[-1]
 
-
         if MCurrent >= 0.99:
             print("choked at x = ", xCurrent)
             print("choked at region = ", geometry_regions(xCurrent))
@@ -753,12 +787,6 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
         print("throat not reached or not captured")
         choked_mdot = float('nan')
         StagPressure_Predicted = float('nan')
-    #choked_mdot = choked_massFlow(pStag_List[-1], T_List[-1], throat_Area, tStag_List[-1])
-    #StagPressure_Predicted = pstag_predicted(mdot_List[-1], T_List[-1], throat_Area, tStag_List[-1])
-
-
-    #print("Predicted choked Pstag: ", StagPressure_Predicted * 1e-6, "MPa")
-    #print("Pstag_Preburner: ", Pstag_Preburner * 1e-6, "MPa")
 
     return {
         "velocity": V_List,
@@ -784,8 +812,40 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
         "Number of Solves": numSolves
     }
 n_solves = 1 #number of solves. 
+
 results = consecutive_solves(PstagA, PstagB, uA, TA, uB, TB, n_solves, 0.005)
 
+plt.figure()
+plt.plot(results["x"],results["entropy"])
+plt.xlabel("X (m)")
+plt.ylabel("Entropy (J/kg/K)")
+plt.grid()
+
+plt.figure()
+plt.plot(results["x"],results["pressure"]*1e-6)
+plt.xlabel("X (m)")
+plt.ylabel("Pressure (MPa)")
+plt.grid()
+
+plt.figure()
+plt.plot(results["x"],results["pressure_stag"]*1e-6)
+plt.xlabel("X (m)")
+plt.ylabel("Stagnation Pressure (MPa)")
+plt.grid()
+plt.show()
+
+'''
+start = time.perf_counter()
+
+end = time.perf_counter()
+print("1 run RunTime: ", end - start, "seconds")
+print("num of steps taken: ", len(results["x"]))
+'''
+
+
+'''
+
+#Plots 
 plt.figure()
 plt.plot(results["x"],results["mach_number"])
 plt.xlabel("X (m)")
@@ -793,19 +853,12 @@ plt.ylabel("Mach Num ")
 plt.grid()
 
 plt.figure()
-plt.plot(results["x"],results["density"])
+plt.plot(results["x"],results["velocity"])
 plt.xlabel("X (m)")
-plt.ylabel("Density (kg/m^3)")
-plt.grid()
-
-plt.figure()
-plt.plot(results["x"],results["entropy"])
-plt.xlabel("X (m)")
-plt.ylabel("Entropy")
+plt.ylabel("Velocity (m/s)")
 plt.grid()
 plt.show()
 
-'''
 plt.figure()
 plt.plot(results["x"],results["mdot"], label = "Imposed Mdot")
 plt.plot(results["x"],results["mdot_reconstructed"], label = "Reconstructed Mdot")
@@ -832,12 +885,6 @@ plt.xlabel("X (m)")
 plt.ylabel("Stagnation Temperature ")
 plt.grid()
 
-plt.figure()
-plt.plot(results["x"],results["pressure_stag"])
-plt.xlabel("X (m)")
-plt.ylabel("Stagnation Pressure ")
-plt.grid()
-
 
 plt.figure()
 plt.plot(results["x"], results["entropy"])
@@ -848,14 +895,12 @@ plt.grid()
 plt.show()
 '''
 
-
-#Plots
-
-
 imposed_Mdot = mdot_i #m
-
+'''
+#Residual Checks, and Pstag Root finding
 
 #function to basically sweep through a bunch of diff scales to see if I can find a good bracket for bisection method
+Start_Sweep = time.perf_counter()
 
 def safe_chokedResiduals(scale,numSolves,Cf):
     try: #i am using try and except to catch any errors such as cantera errors etc, and then just returning None for those cases so that the code does not crash
@@ -865,10 +910,13 @@ def safe_chokedResiduals(scale,numSolves,Cf):
         FinalStagPressure = results["pressure_stag"][-1]
         residual = imposed_Mdot - mdotChoke  #we want this to be zero
 
+
         if not np.isfinite(mdotChoke):
+            print("xlocation:", results["x"][-1], "mdot:", mdotChoke, "residual:", residual)
             return None, None, None, False, None, None
 
         if not np.isfinite(residual):
+            print("xlocation:", results["x"][-1], "mdot:", mdotChoke, "residual:", residual)
             return None, None, None, False, None, None
         
         return residual, mdotChoke, results,True, Predicted_stagPressure, FinalStagPressure
@@ -1056,6 +1104,11 @@ else:
 
 scales_List = np.array(scales)
 residuals_List = np.array(residuals)
+End_Sweep = time.perf_counter()
+
+print("Total time for residual sweep: ", End_Sweep - Start_Sweep, "seconds")
+
+
 plt.plot(scales_List, residuals_List, 'o-')
 plt.gca().invert_xaxis()
 plt.ticklabel_format(style='plain', axis='x')
@@ -1066,8 +1119,10 @@ plt.title("Residual vs Scale")
 plt.grid()
 plt.show()
 
+#Other Stuff
+
 # Creating Injector Array and Adding Mass Flow from Injector to global mdot array 
-'''
+
 Vinj = 0 # m/s speed of N2 being injected (alr converted to x direction)
 Dinj = 0.003175 #m Injector diameter
 Ainj = np.pi * (Dinj/2)**2 #m^2 
