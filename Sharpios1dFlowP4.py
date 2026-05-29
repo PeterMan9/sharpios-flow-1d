@@ -211,43 +211,40 @@ def mdotFuncX (x):
 
 # Functions for solving ODEs -functions that solve for dV/dx and dP/dx - based off of 1d sharpios flow equations 
 
-def dVdX (V,A,M,cp,T,dAdX,localdHtdx,mdot,DMDOTDX,Dh, Cf): #first 4 parts of sharpios 1d flow eqn converted to dV/dx
-    gammA = gamma(T)
+def dVdX (V,A,M,cp,T,dAdX,localdHtdx,mdot,DMDOTDX,Dh, Cf, gamma): #first 4 parts of sharpios 1d flow eqn converted to dV/dx
     term1 = ((-V)/(A * (1 - M**2)))* dAdX
     term2 = ((V/((1-M**2) * cp * T)) * localdHtdx)
-    term3 = ((gammA *M**2)/(2 * (1 - M**2)))
+    term3 = ((gamma *M**2)/(2 * (1 - M**2)))
     term4 = ((((4 * Cf * V)/Dh)) - (2*(Vinj/mdot) * DMDOTDX))
-    term5 = (((V*(1 + gammA * M**2))/((1-M**2)*mdot)) * (DMDOTDX))
+    term5 = (((V*(1 + gamma * M**2))/((1-M**2)*mdot)) * (DMDOTDX))
     return term1 + term2 + (term3*term4) + term5
 
-def dPdX (P,V,A,M,cp,T,DADX,localdHtdx,mdot,DMDOTDX,Dh, Cf): #first 4 parts of sharpios 1d flow eqn converted to dP/dx
-    gammA = gamma(T)
-    term1 = ((gammA * M**2 * P)/(A * (1 - M**2))) * DADX
-    term2 = -(((gammA * M**2 * P)/((1-M**2) * cp * T)) * localdHtdx)
-    term3  = -((gammA * M**2 * (1 + (gammA-1) * M**2))/(2 * (1 - M**2)))
+def dPdX (P,V,A,M,cp,T,DADX,localdHtdx,mdot,DMDOTDX,Dh, Cf, gamma): #first 4 parts of sharpios 1d flow eqn converted to dP/dx
+
+    term1 = ((gamma * M**2 * P)/(A * (1 - M**2))) * DADX
+    term2 = -(((gamma * M**2 * P)/((1-M**2) * cp * T)) * localdHtdx)
+    term3  = -((gamma * M**2 * (1 + (gamma-1) * M**2))/(2 * (1 - M**2)))
     term4 = (((4 * Cf * (P/Dh))) - (2 * ((Vinj * P)/(mdot * V)) * (DMDOTDX)))
-    term5 = -(((2 * gammA * M**2 * (1 + ((gammA-1)/2) *M**2)*P)/((1-M**2)*mdot)) * (DMDOTDX))
+    term5 = -(((2 * gamma * M**2 * (1 + ((gamma-1)/2) *M**2)*P)/((1-M**2)*mdot)) * (DMDOTDX))
     return term1 + term2 + (term3 * term4) + term5
 
-def pressureStagFunc(P,M,T):
-    gammA = gamma(T)
-    Pstag = P * (1 + (gammA - 1)/2 * M**2)**(gammA/(gammA-1))
+def pressureStagFunc(P,M,gamma):
+    Pstag = P * (1 + (gamma - 1)/2 * M**2)**(gamma/(gamma-1))
     return Pstag
 
-def temperatureStagFunc(T,M):
-    gammA = gamma(T)
-    Tstag = T * (1 + (gammA - 1)/2 * M**2)
+def temperatureStagFunc(T,M,gamma):
+    Tstag = T * (1 + (gamma - 1)/2 * M**2)
     return Tstag
 
-def choked_massFlow(Pstag,T,Astar,Tstag):
-    mdot_choke = (Pstag * Astar/np.sqrt(Tstag)) * np.sqrt(gamma(T) / R) * ((gamma(T) + 1)/2)**(-(gamma(T) + 1)/(2*(gamma(T)-1)))
+def choked_massFlow(Pstag,Astar,Tstag, gamma):
+    mdot_choke = (Pstag * Astar/np.sqrt(Tstag)) * np.sqrt(gamma / R) * ((gamma + 1)/2)**(-(gamma + 1)/(2*(gamma-1)))
     return mdot_choke
 
-def pstag_predicted(mdot,T,Astar,Tstag):
-    Pstag_pred = mdot * (np.sqrt(Tstag)/Astar) / (np.sqrt(gamma(T) / R) * ((gamma(T) + 1)/2)**(-(gamma(T) + 1)/(2*(gamma(T)-1))))
+def pstag_predicted(mdot,Astar,Tstag,gamma):
+    Pstag_pred = mdot * (np.sqrt(Tstag)/Astar) / (np.sqrt(gamma / R) * ((gamma + 1)/2)**(-(gamma + 1)/(2*(gamma-1))))
     return Pstag_pred
 
-def E1_CV(ui,Ti,uA,uB,TA,TB):
+def E1_CV(ui,Ti,uA,uB,TA,TB,R):
     return ui - (mdotAir/mdot_i) * uA - (mdotH2/mdot_i) * uB - (mdotAir * R * TA)/(mdot_i * uA) - (mdotH2 * R * TB)/(mdot_i * uB) + (R * Ti)/ui
 
 def E2_CV(ui,Ti,uA,uB,TA,TB):
@@ -503,7 +500,7 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
     if location == "Preburner":
         h = min(h, 1e-1)
     elif location == "Conv Nozzle" or location == "Div Nozzle":
-        h = min(h, 1e-3)
+        h = min(h, 5e-3)
     elif location == "Throat":
         h = min(h, 1e-3)
     
@@ -708,6 +705,7 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
         Pbefore = pressure[-1]
         Tbefore = temp [-1]
         #print("xCurrent: ", xCurrent)
+        
         xNext, VCurrent, PCurrent, TCurrent, hNext, accepted = rk45Step(Vbefore,Pbefore, Cf,hCurrent, xCurrent,Tbefore)
 
         xList.append(xNext)
