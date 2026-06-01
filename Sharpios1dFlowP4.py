@@ -88,12 +88,13 @@ def mNum(v,a): #mach number
     M = v/a
     return M
 
-def soS(T): #solving for a using variable gamma and Cp 
-    a = np.sqrt(gamma(T) * R * T)
+def soS(T, R): #solving for a using variable gamma and Cp 
+    a = np.sqrt(gamma(T,R) * R * T)
     return a
+
 #Species and species properties
+
 gas = ct.Solution('h2_air.yaml')
-print(gas.species_names)
 # Y is mass fraction for cantera 
 
 def gas_properties(T,P,Y):
@@ -102,11 +103,13 @@ def gas_properties(T,P,Y):
     h = gas.enthalpy_mass
     gamma = gas.cp_mass/gas.cv_mass
     R_specific = gas.cp_mass - gas.cv_mass
+    s = gas.entropy_mass
     return{
         "cp": cp,
         "h": h,
         "gamma": gamma,
-        "R_specific": R_specific
+        "R_specific": R_specific,
+        "s": s
 
     }
 
@@ -115,91 +118,116 @@ def get_Y(comp_string):
     return gas.Y.copy()
 
 def Ymix(YA, YB):
-    Ymix = (mdotAir * YA + mdotH2 * YB)/mdot_i
+    Ymix = (mdot1_Air * YA + mdot3_H2 * YB)/mdot_i
     return Ymix
 
-#dhtdx profile
-qtotal =1e6
-x_s = 0
+#smarts model
+hpr_h2 = 120e6 #J/kg
+fst = 0.029
+phi = 0.2306
+eta_total = 1
+theta = 0.5
+x_react = 0
 
-def dHtdx(x):#dht/dx profile - quadtratic Ht
-    return (qtotal/preburner_length) * (x - x_s)
+def x_norm(x):
+    return (x - x_react)/(preburner_length - x_react)
+
+def eta(x):
+    eta = eta_total * (theta * x_norm(x)/(1 + (theta - 1) * x_norm(x)))
+    return eta
+
+def dPHI(x,dx):
+    xcurrent = x
+    xprev = x - dx
+    dPHI = phi * (eta(xcurrent) - eta(xprev))
+    return dPHI
+
+def dHtdx(x,dx):
+    return (dPHI(x,dx) * hpr_h2 * fst)/dx
 
 # Nasa Polynomials
-def CpNasa(T): #solving variable Cp with NASA polynomials for N2 
+def CpNasa(T, R): #solving variable Cp with NASA polynomials for N2 
     return (0.02926640*10**2 + 0.14879768E-02 * T - 0.05684760E-05 * T**2 + 0.10097038E-09 * T**3 - 0.06753351E-13 * T**4) * R
 
-def gamma(T):#solving for gamma using 
-    return CpNasa(T) / (CpNasa(T) - R)
+def gamma(T, R):#solving for gamma using 
+    return CpNasa(T, R) / (CpNasa(T, R) - R)
      
-def hTNasa(T): #solving for static enthalpy using NASA polynomials for N2
+def hTNasa(T, R): #solving for static enthalpy using NASA polynomials for N2
     return (0.02926640*10**2 + (0.14879768E-02 * T)/2 - (0.05684760E-05 * T**2)/3 + (0.10097038E-09 * T**3)/4 - (0.06753351E-13 * T**4)/5) * R * T
 
-
 def residualT(T_new,T_old,xOld,uOld,uNew,dx):
-
-    ht_old = hTNasa(T_old)
-    ht_new = hTNasa(T_new)
+    ht_old = hTNasa(T_old, R_mix)
+    ht_new = hTNasa(T_new, R_mix)
     term1 = (ht_new - ht_old)
     term2 = (uNew**2 - uOld**2)/2
-    term3 = dHtdx(xOld) * dx
-
+    term3 = dHtdx(xOld,dx) * dx
     return term1 + term2 - term3
 
-#initial conditions and mixing solver  
-total_Injector_Area = preburner_area * 0.15
+#initial conditions
 
-A_airInjs = total_Injector_Area * 0.7
-A_H2Injs = total_Injector_Area * 0.3
+#using pb
+dir_air = 0.229/39.37 #meters
+d_h2 = 0.034/39.37  #meters
 
-P1 = 8*1e6 #Pa
-P2 = 8*1e6 #Pa
-P3 = 2*1e6 #Pa
-PA = P1 #Pa. Pa is equal to P1 and P2 because they are the same injector and they are connected to the same plenum.
-PB = P3 #Pa
+A_airInjs = np.pi * (dir_air/2)**2
+A_H2Injs = np.pi * (d_h2/2)**2
 
-TA = 300 #K
-TA_2 = 300 #K
-TB = 300 #K
+P1 = 7.708339*1e6 #Pa
+P2 = 7.708339*1e6 #Pa
+P3 = 8.315077*1e6 #Pa
+
+P_air = P1 #Pa. Pa is equal to P1 and P2 because they are the same injector and they are connected to the same plenum.
+P_H2 = P3 #Pa
+
+T_air = 300 #K
+T_air2= 300 #K
+T_H2 = 300 #K
 
 M1 = 0.95
 M2 = 0.95
 M3 = 0.95
 
-a1 = soS(TA)
-a2 = soS(TA_2)
-a3 = soS(TB)
-
-uA = M1 * a1
-uA_2 = M2 * a2
-uB = M3 * a3
-print("PA",PA*1e-6," uA", uA)
-TstagA = TA * (1 + ((gamma(TA) - 1)/2) * M1**2)
-TstagB = TB * (1 + ((gamma(TB) - 1)/2) * M3**2)
-
-PstagA = PA * (1 + (gamma(TA) - 1)/2 * M1**2)**(gamma(TA)/(gamma(TA)-1))
-PstagB = PB * (1 + (gamma(TB) - 1)/2 * M3**2)**(gamma(TB)/(gamma(TB)-1))
-
-mdot1_Air = 0.2
-mdot2_Air = 0.2
-mdot3_H2 = 0.004
-
-rho1 = mdot1_Air/(A_airInjs * uA)
-rho2 = mdot2_Air/(A_airInjs * uA_2)
-rho3 = mdot3_H2/(A_H2Injs * uB)
+mdot1_Air = 0.4430/2
+mdot2_Air = 0.4430/2
+mdot3_H2 = 0.003
 
 mdotAir = mdot1_Air + mdot2_Air #injector 1 and 2 are the same so can just add them together
 mdotH2 = mdot3_H2 #big injector
 mdot_i = mdotAir + mdotH2
 
-
 Y_air = get_Y("O2:0.21, N2:0.79")
 Y_H2 = get_Y("H2:1.0")
-
 Y_mix = Ymix(Y_air, Y_H2)
 
+R_air = gas_properties(T_air, P_air, get_Y("O2:0.21, N2:0.79"))["R_specific"]
+R_H2 = gas_properties(T_H2, P_H2, get_Y("H2:1.0"))["R_specific"]
+R_mix = gas_properties(None, None, Ymix(get_Y("O2:0.21, N2:0.79"), get_Y("H2:1.0")))["R_specific"]
+print("R_air", R_air, "R_H2", R_H2, "R_mix", R_mix)
+a1 = soS(T_air, R_air)
+a2 = soS(T_air2, R_air)
+a3 = soS(T_H2, R_H2)
+
+
+print("a1", a1, "a2", a2, "a3", a3)
+uA = M1 * a1
+uA_2 = M2 * a2
+uB = M3 * a3
+
+print("uA", uA, "uA_2", uA_2, "uB", uB)
+
+TstagA = T_air * (1 + ((gamma(T_air, R_air) - 1)/2) * M1**2)
+TstagB = T_H2 * (1 + ((gamma(T_H2, R_H2) - 1)/2) * M3**2)
+
+Pstag_Air = P_air * (1 + (gamma(T_air, R_air) - 1)/2 * M1**2)**(gamma(T_air, R_air)/(gamma(T_air, R_air)-1))
+Pstag_H2 = P_H2 * (1 + (gamma(T_H2, R_H2) - 1)/2 * M3**2)**(gamma(T_H2, R_H2)/(gamma(T_H2, R_H2)-1))
+
+rho1 = mdot1_Air/(A_airInjs * uA)
+rho2 = mdot2_Air/(A_airInjs * uA_2)
+rho3 = mdot3_H2/(A_H2Injs * uB)
 
 A_CV_END = preburner_area #area at the end of the CV is the same as the area at the start of the preburner inlet.
+
+
 def delMdotdx(mdotn1, mdotn,x1,x): #dmdot/dx function
     return (mdotn1 - mdotn)/(x1-x)
 
@@ -209,23 +237,29 @@ def mdotFuncX (x):
     else:   #post injector mdot
         return mdot_i + injMdot 
 
-# Functions for solving ODEs -functions that solve for dV/dx and dP/dx - based off of 1d sharpios flow equations 
+#1st order ODE Functions
+def dVdX (V,A,M,T,P,mdot,dmdotDX, Cf, x,dx): #first 4 parts of sharpios 1d flow eqn converted to dV/dx
+    gas_Prop = gas_properties(T, P, Y_mix)
+    cp = gas_Prop["cp"]
+    gamma = gas_Prop["gamma"]
 
-def dVdX (V,A,M,cp,T,dAdX,localdHtdx,mdot,DMDOTDX,Dh, Cf, gamma): #first 4 parts of sharpios 1d flow eqn converted to dV/dx
-    term1 = ((-V)/(A * (1 - M**2)))* dAdX
-    term2 = ((V/((1-M**2) * cp * T)) * localdHtdx)
+    term1 = ((-V)/(A * (1 - M**2)))* dAdx(x)
+    term2 = ((V/((1-M**2) * cp * T)) * dHtdx(x,dx))
     term3 = ((gamma *M**2)/(2 * (1 - M**2)))
-    term4 = ((((4 * Cf * V)/Dh)) - (2*(Vinj/mdot) * DMDOTDX))
-    term5 = (((V*(1 + gamma * M**2))/((1-M**2)*mdot)) * (DMDOTDX))
+    term4 = ((((4 * Cf * V)/Dh(x))) - (2*(Vinj/mdot) * dmdotDX))
+    term5 = (((V*(1 + gamma * M**2))/((1-M**2)*mdot)) * (dmdotDX))
     return term1 + term2 + (term3*term4) + term5
 
-def dPdX (P,V,A,M,cp,T,DADX,localdHtdx,mdot,DMDOTDX,Dh, Cf, gamma): #first 4 parts of sharpios 1d flow eqn converted to dP/dx
+def dPdX (V,A,M,T,P,mdot,dmdotDX, Cf, x,dx): #first 4 parts of sharpios 1d flow eqn converted to dP/dx
+    gas_Prop = gas_properties(T, P, Y_mix)
+    cp = gas_Prop["cp"]
+    gamma = gas_Prop["gamma"]
 
-    term1 = ((gamma * M**2 * P)/(A * (1 - M**2))) * DADX
-    term2 = -(((gamma * M**2 * P)/((1-M**2) * cp * T)) * localdHtdx)
+    term1 = ((gamma * M**2 * P)/(A * (1 - M**2))) * dAdx(x)
+    term2 = -(((gamma * M**2 * P)/((1-M**2) * cp * T)) * dHtdx(x,dx))
     term3  = -((gamma * M**2 * (1 + (gamma-1) * M**2))/(2 * (1 - M**2)))
-    term4 = (((4 * Cf * (P/Dh))) - (2 * ((Vinj * P)/(mdot * V)) * (DMDOTDX)))
-    term5 = -(((2 * gamma * M**2 * (1 + ((gamma-1)/2) *M**2)*P)/((1-M**2)*mdot)) * (DMDOTDX))
+    term4 = (((4 * Cf * (P/Dh(x)))) - (2 * ((Vinj * P)/(mdot * V)) * (dmdotDX)))
+    term5 = -(((2 * gamma * M**2 * (1 + ((gamma-1)/2) *M**2)*P)/((1-M**2)*mdot)) * (dmdotDX))
     return term1 + term2 + (term3 * term4) + term5
 
 def pressureStagFunc(P,M,gamma):
@@ -244,80 +278,40 @@ def pstag_predicted(mdot,Astar,Tstag,gamma):
     Pstag_pred = mdot * (np.sqrt(Tstag)/Astar) / (np.sqrt(gamma / R) * ((gamma + 1)/2)**(-(gamma + 1)/(2*(gamma-1))))
     return Pstag_pred
 
-def E1_CV(ui,Ti,uA,uB,TA,TB,R):
-    return ui - (mdotAir/mdot_i) * uA - (mdotH2/mdot_i) * uB - (mdotAir * R * TA)/(mdot_i * uA) - (mdotH2 * R * TB)/(mdot_i * uB) + (R * Ti)/ui
+#Mixing Equations
+def E1_CV(ui,Ti,uA,uB,TA,TB):
+    return ui - (mdotAir/mdot_i) * uA - (mdotH2/mdot_i) * uB - (mdotAir * R_air * TA)/(mdot_i * uA) - (mdotH2 * R_H2 * TB)/(mdot_i * uB) + (R_mix * Ti)/ui
 
 def E2_CV(ui,Ti,uA,uB,TA,TB):
-    hi = hTNasa(Ti)
-    hA = hTNasa(TA)
-    hB = hTNasa(TB)
+    hi = hTNasa(Ti, R_mix)
+    hA = hTNasa(TA, R_air)
+    hB = hTNasa(TB, R_H2)
     return (hi + ui**2/2) - (mdotAir/mdot_i) * (hA + uA**2/2) - (mdotH2/mdot_i) * (hB + uB**2/2)
 
 def E3_InjA_CV(PstagA_2, uA_2, TA_2): #third cv equation check power point for indepth breakdown
-    part1 = (PstagA_2/(R * TstagA))
-    part2_partial = ((gamma(TA_2) - 1)/2) * ((uA_2)**2)/(soS(TA_2)**2)
+    part1 = (PstagA_2/(R_air * TstagA))
+    part2_partial = ((gamma(TA_2, R_air) - 1)/2) * ((uA_2)**2)/(soS(TA_2, R_air)**2)
     part2 = (1 + (part2_partial))
-    part3 = (1 - (gamma(TA_2)/(gamma(TA_2) - 1)))
+    part3 = (1 - (gamma(TA_2, R_air)/(gamma(TA_2, R_air) - 1)))
     rhoA = part1 * part2 **part3
     return rhoA * uA_2 * A_airInjs - mdotAir
 
 def E4_InjB_CV(PstagB_2, uB_2, TB_2): #third cv equation check power point for indepth breakdown
-    part1 = (PstagB_2/(R * TstagB))
-    part2 = (1 + ((gamma(TB_2) - 1)/2) * ((uB_2/soS(TB_2))**2))
-    part3 = (1 - 1*(gamma(TB_2)/(gamma(TB_2)-1)))
+    part1 = (PstagB_2/(R_H2 * TstagB))
+    part2 = (1 + ((gamma(TB_2, R_H2) - 1)/2) * ((uB_2/soS(TB_2, R_H2))**2))
+    part3 = (1 - 1*(gamma(TB_2, R_H2)/(gamma(TB_2, R_H2)-1)))
     rhoB = part1 * part2**part3
     return rhoB * uB_2 * A_H2Injs - mdotH2
 
 def E5_InjA_CV(TA_2,uA_2):
-    part1_partial = (((gamma(TA_2) - 1)/2) * ((uA_2)**2)/(soS(TA_2)**2))
+    part1_partial = (((gamma(TA_2, R_air) - 1)/2) * ((uA_2)**2)/(soS(TA_2, R_air)**2))
     part1 = (1 + part1_partial)
     return (TA_2 * part1) - TstagA
 
 def E6_InjB_CV(TB_2,uB_2):
-    part1_partial = (((gamma(TB_2) - 1)/2) * ((uB_2)**2)/(soS(TB_2)**2))
+    part1_partial = (((gamma(TB_2, R_H2) - 1)/2) * ((uB_2)**2)/(soS(TB_2, R_H2)**2))
     part1 = (1 + part1_partial)
     return (TB_2 * part1) - TstagB
-
-def CV_toPreburner(u2,T2,uA,uB,TA,TB): #this is newton raphson for the CV it goes from state 1 (once gasses have mixed) to state 2 (preburner inlet) 
-    numIters = 0        #cut down the system of equations to 2 equations and 2 unkowns so just solving till im under tolorence 
-    tol = 1e-8
-
-    E1 = E1_CV(u2,T2,uA,uB,TA,TB)
-    E2 = E2_CV(u2,T2,uA,uB,TA,TB)
-    E_vec = np.array([E1, E2])
-
-    while(np.linalg.norm(E_vec, 2) >= tol and numIters <= 100):
-        #numerical jacobian 
-
-        deltaU = u2/1e8  #the delta or perturbation will be updating as u2 and T2 update to make sure its not too big or too small.
-        deltaT = T2/1e8
-
-
-        dE1du = (E1_CV(u2 + deltaU, T2, uA, uB, TA, TB) - E1)/deltaU
-        dE1dT = (E1_CV(u2, T2 + deltaT, uA, uB, TA, TB) - E1)/deltaT
-        dE2du = (E2_CV(u2 + deltaU, T2, uA, uB, TA, TB) - E2)/deltaU
-        dE2dT = (E2_CV(u2, T2 + deltaT, uA, uB, TA, TB) - E2)/deltaT
-
-        J = np.array([[dE1du, dE1dT], [dE2du, dE2dT]])
-        
-        deltas = np.linalg.solve(J, -E_vec)
-        
-        u2 += deltas[0]
-        T2 += deltas[1]
-
-        E1 = E1_CV(u2,T2,uA,uB,TA,TB)   #updating E1 and E2 values after updating u2 and T2 to check for convergence and to move
-        E2 = E2_CV(u2,T2,uA,uB,TA,TB)   #the method forward
-        E_vec = np.array([E1, E2])   
-
-        numIters += 1 #just counting num of iterations 
-
-    if numIters > 100 or not np.isfinite(u2) or not np.isfinite(T2) or T2 <= 0:
-        raise RuntimeError("CV to Preburner solve failed")
-
-
-    return u2, T2
-
-
 
 #NewtonRaphson Solvers
 
@@ -339,8 +333,8 @@ def InjA_Loss_CV(Pstag_A2,uA_2, TA_2):
 
     while(np.linalg.norm(E_vec, 2) >= tol and numIters <= 100):
 
-        deltaU = max(abs(uA_2)*1e-6, 1e-6)
-        deltaT = max(abs(TA_2)*1e-6, 1e-4)
+        deltaU = max(abs(uA_2)*1e-6, 1e-3)
+        deltaT = max(abs(TA_2)*1e-6, 1e-3)
 
         #partial derivatives for numerical jacobian
         dE5du = (E5_InjA_CV(TA_2, uA_2+ deltaU) - E5)/deltaU
@@ -385,20 +379,19 @@ def InjA_Loss_CV(Pstag_A2,uA_2, TA_2):
         if numIters > 100 or not np.isfinite(uA_2) or not np.isfinite(TA_2) or TA_2 <= 0:
          raise RuntimeError("InjA solve failed")
         
-    print("uA_2", uA_2, "TA_2", TA_2)
     return uA_2, TA_2
 
 def InjB_Loss_CV(Pstag_B2,uB_2, TB_2):
     numIters = 0
-    tol = 1e-8
+    tol = 1e-6
 
     E4 = E4_InjB_CV(Pstag_B2,uB_2, TB_2)
     E6 = E6_InjB_CV(TB_2,uB_2)
     E_vec = np.array([E6, E4])
 
-    while(np.linalg.norm(E_vec, 2) >= tol and numIters <= 100):
-        deltaU = max(abs(uB_2)*1e-6, 1e-6)
-        deltaT = max(abs(TB_2)*1e-6, 1e-6)
+    while(np.linalg.norm(E_vec, 2) >= tol and numIters <= 500):
+        deltaU = max(abs(uB_2)*1e-6, 1e-3)
+        deltaT = max(abs(TB_2)*1e-6, 1e-3)
 
         #partial derivatives for numerical jacobian
         dE6du = (E6_InjB_CV(TB_2, uB_2 + deltaU) - E6)/deltaU
@@ -438,14 +431,50 @@ def InjB_Loss_CV(Pstag_B2,uB_2, TB_2):
         E4 = E4_trial
         E_vec = np.array([E6, E4])
 
-
         numIters += 1
 
-        if numIters > 100 or not np.isfinite(uB_2) or not np.isfinite(TB_2) or TB_2 <= 0:
+        if numIters > 500 or not np.isfinite(uB_2) or not np.isfinite(TB_2) or TB_2 <= 0:
+         print("uB_2", uB_2, "TB_2", TB_2, "numIters", numIters)
          raise RuntimeError("InjB solve failed")
         
-    print("uB_2", uB_2, "TB_2", TB_2)
     return uB_2, TB_2
+
+def CV_toPreburner(u2,T2,uA,uB,TA,TB): #this is newton raphson for the CV it goes from state 1 (once gasses have mixed) to state 2 (preburner inlet) 
+    numIters = 0                         #cut down the system of equations to 2 equations and 2 unkowns so just solving till im under tolorence 
+    tol = 1e-8
+
+    E1 = E1_CV(u2,T2,uA,uB,TA,TB)
+    E2 = E2_CV(u2,T2,uA,uB,TA,TB)
+    E_vec = np.array([E1, E2])
+
+    while(np.linalg.norm(E_vec, 2) >= tol and numIters <= 100):
+        #numerical jacobian 
+
+        deltaU = u2/1e8  #the delta or perturbation will be updating as u2 and T2 update to make sure its not too big or too small.
+        deltaT = T2/1e8
+
+        dE1du = (E1_CV(u2 + deltaU, T2, uA, uB, TA, TB) - E1)/deltaU
+        dE1dT = (E1_CV(u2, T2 + deltaT, uA, uB, TA, TB) - E1)/deltaT
+        dE2du = (E2_CV(u2 + deltaU, T2, uA, uB, TA, TB) - E2)/deltaU
+        dE2dT = (E2_CV(u2, T2 + deltaT, uA, uB, TA, TB) - E2)/deltaT
+
+        J = np.array([[dE1du, dE1dT], [dE2du, dE2dT]])
+        
+        deltas = np.linalg.solve(J, -E_vec)
+        
+        u2 += deltas[0]
+        T2 += deltas[1]
+
+        E1 = E1_CV(u2,T2,uA,uB,TA,TB)   #updating E1 and E2 values after updating u2 and T2 to check for convergence and to move
+        E2 = E2_CV(u2,T2,uA,uB,TA,TB)   #the method forward
+        E_vec = np.array([E1, E2])   
+
+        numIters += 1 #just counting num of iterations 
+
+    if numIters > 100 or not np.isfinite(u2) or not np.isfinite(T2) or T2 <= 0:
+        raise RuntimeError("CV to Preburner solve failed")
+
+    return u2, T2
 
 def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx):
     numIters = 0
@@ -491,7 +520,6 @@ def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx):
 
 #rk45
 
-#planning on optimizng rk45 and makin the minimum step size region based 
 def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
     accepted = False 
     tol = 1e-6
@@ -503,105 +531,83 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         h = min(h, 5e-3)
     elif location == "Throat":
         h = min(h, 1e-3)
-    
-
+        
     while (accepted != True):
         mdot_Current = mdotFuncX(x)
         mdot_Prev = mdotFuncX(x-h)
         x1 = x
-        dHtdx1 = dHtdx(x1)
         A1 = geom_Area(x1)
         V1 = V
         P1 =  P
         T1 = T_preburner
-
-        cp1 = CpNasa(T1)
-        a1 = soS(T1)
+        a1 = soS(T1,R_mix)
         M1 = mNum(V1,a1)
-        k1V = h * dVdX(V1,A1,M1,cp1,T1,dAdx(x1),dHtdx1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Dh(x1), Cf)
-        k1P = h * dPdX(P1,V1,A1,M1,cp1,T1,dAdx(x1),dHtdx1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Dh(x1), Cf)
-        #print("T1", T1)
+        k1V = h * dVdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf,x1,h)
+        k1P = h * dPdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf,x1,h)
 
         x2 = x1 + 1/5 * h
-        dHtdx2 = dHtdx(x2)
         A2 = geom_Area(x2)
         V2 = V + 1/5 * k1V 
         P2 = P + 1/5 * k1P
-        #T_old,T_new,xOld,xNew,uOld,uNew,dx
         T2 = newtonRaphson_T(T1, T1, x1, V1, V2, 1/5 * h) 
-        cp2 = CpNasa(T2)
-        a2 = soS(T2)
+        a2 = soS(T2,R_mix)
         M2 = mNum(V2,a2)
-        k2V = h * dVdX(V2,A2,M2,cp2,T2,dAdx(x2),dHtdx2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Dh(x2), Cf)
-        k2P = h * dPdX(P2,V2,A2,M2,cp2,T2,dAdx(x2),dHtdx2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Dh(x2), Cf)
-        #print("T2", T2)
+        k2V = h * dVdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf,x2,1/5 * h)
+        k2P = h * dPdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf,x2,1/5 * h)
 
         x3 = x1 + 3/10 * h
-        dHtdx3 = dHtdx(x3)
         A3 = geom_Area(x3)
         V3 = V + 3/40 * k1V + 9/40 * k2V
         P3 = P + 3/40 * k1P + 9/40 * k2P
         T3 = newtonRaphson_T(T1, T1, x1, V1, V3, 3/10 * h) 
-        cp3 = CpNasa(T3)
-        a3 = soS(T3)
+        a3 = soS(T3,R_mix)
         M3 = mNum(V3,a3)
-        k3V = h * dVdX(V3,A3,M3,cp3,T3,dAdx(x3),dHtdx3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Dh(x3), Cf)
-        k3P = h * dPdX(P3,V3,A3,M3,cp3,T3,dAdx(x3),dHtdx3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Dh(x3), Cf)
-        #print("T3", T3)
+        k3V = h * dVdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf,x3,3/10 * h)
+        k3P = h * dPdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf,x3,3/10 * h)
 
         x4 = x1 + 4/5 * h
-        dHtdx4 = dHtdx(x4)
         A4 = geom_Area(x4)
         V4 = V + 44/45 * k1V - 56/15 * k2V + 32/9 * k3V
         P4 = P + 44/45 * k1P - 56/15 * k2P + 32/9 * k3P
         T4 = newtonRaphson_T(T1, T1, x1, V1, V4, 4/5 * h) 
-        cp4 = CpNasa(T4)
-        a4 = soS(T4)
+        a4 = soS(T4,R_mix)
         M4 = mNum(V4,a4)
-        k4V = h * dVdX(V4,A4,M4,cp4,T4,dAdx(x4),dHtdx4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Dh(x4), Cf)
-        k4P = h * dPdX(P4,V4,A4,M4,cp4,T4,dAdx(x4),dHtdx4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Dh(x4), Cf)
-        #print("T4", T4)
+        k4V = h * dVdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf,x4,4/5 * h)
+        k4P = h * dPdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf,x4,4/5 * h)
 
         x5 = x1 + 8/9 * h
-        dHtdx5 = dHtdx(x5)
         A5 = geom_Area(x5)
         V5 = V + 19372/6561 * k1V - 25360/2187 * k2V + 64448/6561 * k3V - 212/729 * k4V
         P5 = P + 19372/6561 * k1P - 25360/2187 * k2P + 64448/6561 * k3P - 212/729 * k4P
         T5 = newtonRaphson_T(T1, T1, x1, V1, V5, 8/9 * h)
-        cp5 = CpNasa(T5)
-        a5 = soS(T5)
+        a5 = soS(T5,R_mix)
         M5 = mNum(V5,a5)
-        k5V = h * dVdX(V5,A5,M5,cp5,T5,dAdx(x5),dHtdx5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Dh(x5), Cf)
-        k5P = h * dPdX(P5,V5,A5,M5,cp5,T5,dAdx(x5),dHtdx5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Dh(x5), Cf)
-        #print("T5", T5)
+        k5V = h * dVdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf,x5,8/9 * h)
+        k5P = h * dPdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf,x5,8/9 * h)
 
         x6 = x1 + h
-        dHtdx6 = dHtdx(x6)
         A6 = geom_Area(x6)
         V6 = V + 9017/3168 * k1V - 355/33 * k2V + 46732/5247 * k3V + 49/176 * k4V - 5103/18656 * k5V
         P6 = P + 9017/3168 * k1P - 355/33 * k2P + 46732/5247 * k3P + 49/176 * k4P - 5103/18656 * k5P
         T6 = newtonRaphson_T(T1, T1, x1, V1, V6, 1 * h)
-        cp6 = CpNasa(T6)
-        a6 = soS(T6)
+        a6 = soS(T6,R_mix)
         M6 = mNum(V6,a6)
-        k6V = h * dVdX(V6,A6,M6,cp6,T6,dAdx(x6),dHtdx6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Dh(x6), Cf)
-        k6P = h * dPdX(P6,V6,A6,M6,cp6,T6,dAdx(x6),dHtdx6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Dh(x6), Cf)
+        k6V = h * dVdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf,x6,h)
+        k6P = h * dPdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf,x6,h)
 
         #5th order solution 
         v_5Order = V + 35/384 * k1V + 500/1113 * k3V + 125/192 * k4V - 2187/6784 * k5V + 11/84 * k6V
         p_5Order = P + 35/384 * k1P + 500/1113 * k3P + 125/192 * k4P - 2187/6784 * k5P + 11/84 * k6P
 
         x7 = x1 + h
-        dHtdx7 = dHtdx(x7)
         A7 = geom_Area(x7)
         V7 = v_5Order
         P7 = p_5Order
         T7 = newtonRaphson_T(T1, T1, x1, V1, V7, 1 * h)
-        cp7 = CpNasa(T7)
-        a7 = soS(T7)
+        a7 = soS(T7,R_mix)
         M7 = mNum(V7,a7)
-        k7V = h * dVdX(V7,A7,M7,cp7,T7,dAdx(x7),dHtdx7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Dh(x7), Cf)
-        k7P = h * dPdX(P7,V7,A7,M7,cp7,T7,dAdx(x7),dHtdx7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Dh(x7), Cf)
+        k7V = h * dVdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf,x7,h)
+        k7P = h * dPdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf,x7,h)
 
         #4th order solution
         v_4Order = V + 5179/57600 * k1V + 7571/16695 * k3V + 393/640 * k4V - 92097/339200 * k5V + 187/2100 * k6V + 1/40 * k7V
@@ -649,24 +655,18 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     T_preburner_guess = (T_InjA_2 * mdotAir + T_InjB_2 * mdotH2)/(mdot_i)
 
     u_preburner, T_preburner = CV_toPreburner(u_preburner_guess, T_preburner_guess, u_InjA_2, u_InjB_2, T_InjA_2, T_InjB_2)
-    M_Preburner_Inlet = u_preburner/soS(T_preburner)
+    M_Preburner_Inlet = u_preburner/soS(T_preburner,R_mix)
     
-    Tstag_Preburner = temperatureStagFunc(T_preburner, M_Preburner_Inlet)
-
     Pstag_Preburner = 1* pstagA_2
-    
-    P_preburner = (1 + (gamma(T_preburner) - 1)/2 * M_Preburner_Inlet**2)**(-gamma(T_preburner)/(gamma(T_preburner)-1)) * Pstag_Preburner
-    rho_preburner = mdot_i/(A_CV_END * u_preburner)
+    P_preburner = (1 + (gamma(T_preburner,R_mix) - 1)/2 * M_Preburner_Inlet**2)**(-gamma(T_preburner,R_mix)/(gamma(T_preburner,R_mix)-1)) * Pstag_Preburner
 
+    currentMix_properties = gas_properties(T_preburner, P_preburner,Y_mix)
+    currentMix_gamma = currentMix_properties["gamma"]
+
+    Tstag_Preburner = temperatureStagFunc(T_preburner, M_Preburner_Inlet,currentMix_gamma)
+
+    rho_preburner = mdot_i/(A_CV_END * u_preburner)
     mdot_preburner = rho_preburner * u_preburner * A_CV_END
-    '''
-    print("Preburner Mach Number:", M_Preburner_Inlet)
-    print("Preburner Pressure:", P_preburner * 1e-6, "MPa")
-    print("Preburner Temperature:", T_preburner)
-    print("Preburner velocity:", u_preburner)
-    print("Preburner rho", rho_preburner)
-    print("Imposed mdot", mdot_i, "solved mdot", mdot_preburner)
-    '''
 
     temp = [T_preburner]                # creating fresh arrays in function 
     velocities = [u_preburner]
@@ -683,8 +683,7 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     stepList = [preburner_length/1e4]
     mdotList = [mdot_i]
     
-    gas.TPX = T_preburner, P_preburner, {'N2': 1.0}
-    sInitial = gas.entropy_mass
+    sInitial = gas_properties(T_preburner, P_preburner,Y_mix)["s"]
     entropy = [sInitial]
 
 
@@ -704,9 +703,10 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
         Vbefore = velocities[-1]
         Pbefore = pressure[-1]
         Tbefore = temp [-1]
-        #print("xCurrent: ", xCurrent)
         
         xNext, VCurrent, PCurrent, TCurrent, hNext, accepted = rk45Step(Vbefore,Pbefore, Cf,hCurrent, xCurrent,Tbefore)
+        currentMix_properties = gas_properties(TCurrent, PCurrent,Y_mix)
+        currentMix_gamma = currentMix_properties["gamma"]
 
         xList.append(xNext)
         xCurrent = xList[-1]
@@ -725,27 +725,19 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
         mdotReconstructed.append(rhoCurrent * VCurrent * geom_Area(xCurrent))
         mdotList.append(mdotFuncX(xCurrent))
 
-        aCurrent = soS(TCurrent)
+        aCurrent = soS(TCurrent,R_mix)
         MCurrent = mNum(VCurrent,aCurrent)
         machNum.append(MCurrent)
 
-        Pstag_current = pressureStagFunc(PCurrent, MCurrent, TCurrent)
+        Pstag_current = pressureStagFunc(PCurrent, MCurrent, currentMix_gamma)
         pStag.append(Pstag_current)
 
-        Tstag_current = temperatureStagFunc(TCurrent, MCurrent)
+        Tstag_current = temperatureStagFunc(TCurrent, MCurrent, currentMix_gamma)
         tStag.append(Tstag_current)
 
-        gas.TP = TCurrent, PCurrent
-        sCurrent = gas.entropy_mass
+        sCurrent = currentMix_properties["s"]
         entropy.append(sCurrent)
-        '''
-        print("#################################################")
-        print("V:", Vbefore, "->", VCurrent)
-        print("P:", Pbefore * 1e-6, "->", PCurrent * 1e-6)
-        print("T:", TCurrent)
-        print("Rho:", rhoCurrent)
-        print(accepted)
-        '''
+
         if geometry_regions(xCurrent) == "Throat": #capturing throat conditions for later use so that i can couple finding my pstag scale with geometric location of the throat 
             throatTemp = temp[-1]
             throatTstag = tStag[-1]
@@ -778,6 +770,7 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
     mdotReconsturcted_List = np.array(mdotReconstructed)
     mdot_List = mdotList
     entropy_List = np.array(entropy)
+
     if np.isfinite(throatTemp) and np.isfinite(throatTstag) and np.isfinite(throatPstag) and np.isfinite(throatMdot):
         choked_mdot = choked_massFlow(throatPstag, throatTemp, throat_Area, throatTstag)
         StagPressure_Predicted = pstag_predicted(throatMdot, throatTemp, throat_Area, throatTstag)
@@ -810,99 +803,46 @@ def consecutive_solves(pstagA_2,pstagB_2, u2_guess_A, T2_guess_A, u2_guess_B, T2
         "Number of Solves": numSolves
     }
 n_solves = 1 #number of solves. 
-
-results = consecutive_solves(PstagA, PstagB, uA, TA, uB, TB, n_solves, 0.005)
-
-plt.figure()
-plt.plot(results["x"],results["entropy"])
-plt.xlabel("X (m)")
-plt.ylabel("Entropy (J/kg/K)")
-plt.grid()
-
-plt.figure()
-plt.plot(results["x"],results["pressure"]*1e-6)
-plt.xlabel("X (m)")
-plt.ylabel("Pressure (MPa)")
-plt.grid()
-
-plt.figure()
-plt.plot(results["x"],results["pressure_stag"]*1e-6)
-plt.xlabel("X (m)")
-plt.ylabel("Stagnation Pressure (MPa)")
-plt.grid()
-plt.show()
-
-'''
 start = time.perf_counter()
+
+results = consecutive_solves(Pstag_Air*0.9, Pstag_H2*0.9, uA, T_air, uB, T_H2, n_solves, 0.005)
 
 end = time.perf_counter()
 print("1 run RunTime: ", end - start, "seconds")
 print("num of steps taken: ", len(results["x"]))
-'''
 
-
-'''
-
-#Plots 
 plt.figure()
-plt.plot(results["x"],results["mach_number"])
-plt.xlabel("X (m)")
-plt.ylabel("Mach Num ")
+plt.plot(results["x"], results["mach_number"])
+plt.xlabel("x (m)")
+plt.ylabel("Mach Number")
+plt.title("Mach Number vs x")
 plt.grid()
 
 plt.figure()
-plt.plot(results["x"],results["velocity"])
-plt.xlabel("X (m)")
-plt.ylabel("Velocity (m/s)")
+plt.plot(results["x"], results["temperature_stag"])
+plt.xlabel("x (m)")
+plt.ylabel("Stagnation Temperature")
+plt.title("Stagnation Temperature vs x")
+plt.grid()
+
+plt.figure()
+plt.plot(results["x"], results["temperature"])
+plt.xlabel("x (m)")
+plt.ylabel("Temperature")
+plt.title("Temperature vs x")
 plt.grid()
 plt.show()
 
-plt.figure()
-plt.plot(results["x"],results["mdot"], label = "Imposed Mdot")
-plt.plot(results["x"],results["mdot_reconstructed"], label = "Reconstructed Mdot")
-plt.xlabel("X (m)")
-plt.ylabel("Mdot (kg/s)")
-plt.legend()
-plt.grid()
-
-plt.figure()
-plt.plot(results["x"],results["mach_number"])
-plt.xlabel("X (m)")
-plt.ylabel("Mach Num ")
-plt.grid()
-
-plt.figure()
-plt.plot(results["x"],results["temperature"])
-plt.xlabel("X (m)")
-plt.ylabel("temperature ")
-plt.grid()
-
-plt.figure()
-plt.plot(results["x"],results["temperature_stag"])
-plt.xlabel("X (m)")
-plt.ylabel("Stagnation Temperature ")
-plt.grid()
-
-
-plt.figure()
-plt.plot(results["x"], results["entropy"])
-plt.xlabel("X (m)")
-plt.ylabel("Entropy")
-plt.grid()
-
-plt.show()
-'''
 
 imposed_Mdot = mdot_i #m
 '''
 #Residual Checks, and Pstag Root finding
-
 #function to basically sweep through a bunch of diff scales to see if I can find a good bracket for bisection method
 Start_Sweep = time.perf_counter()
 
 def safe_chokedResiduals(scale,numSolves,Cf):
     try: #i am using try and except to catch any errors such as cantera errors etc, and then just returning None for those cases so that the code does not crash
-        results = consecutive_solves(PstagA*scale, PstagB*scale, uA, TA, uB, TB, numSolves, Cf)
+        results = consecutive_solves(Pstag_Air*scale, Pstag_H2*scale, uA, T_air, uB, T_H2, numSolves, Cf)
         mdotChoke = results["Choked Mdot"]
         Predicted_stagPressure = results["Predicted Pstag from Mdot"]
         FinalStagPressure = results["pressure_stag"][-1]
@@ -1116,11 +1056,11 @@ plt.ylabel("Residual (imposed mdot - mdotChoke)")
 plt.title("Residual vs Scale")
 plt.grid()
 plt.show()
-
+'''
 #Other Stuff
 
 # Creating Injector Array and Adding Mass Flow from Injector to global mdot array 
-
+'''
 Vinj = 0 # m/s speed of N2 being injected (alr converted to x direction)
 Dinj = 0.003175 #m Injector diameter
 Ainj = np.pi * (Dinj/2)**2 #m^2 
