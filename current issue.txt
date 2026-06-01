@@ -1,0 +1,15 @@
+current issue 
+
+i am able to tune my pstag so that my choked mdot is equal to my imposed mdot. 
+	basically means mdot in equals mdot out. 
+	i believe that this should mean that i should also choke AT the throat 
+	but what ends up happening is that i either tune a pstag for my residuals to = 0 but dont choke, 
+	or i tune my pstag and do choke, but not at the location of the throat. 
+		for example i can find a proper pstag scal, but choke in the diverging section of my throat 
+
+my throat area has a defined location so i am not sure why this is happening 
+
+
+	fixes:
+	fixed my dAdx was doing x/tol instead of x* tol
+	throat region 
