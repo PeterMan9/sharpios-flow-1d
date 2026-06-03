@@ -237,6 +237,7 @@ def E1_CV(ui,Ti,uA,uB,TA,TB):
     return ui - (mdotA/mdot_i) * uA - (mdotB/mdot_i) * uB - (mdotA * R * TA)/(mdot_i * uA) - (mdotB * R * TB)/(mdot_i * uB) + (R * Ti)/ui
 
 def E2_CV(ui,Ti,uA,uB,TA,TB):
+    
     hi = hTNasa(Ti)
     hA = hTNasa(TA)
     hB = hTNasa(TB)
