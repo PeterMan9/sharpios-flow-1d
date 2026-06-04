@@ -6,6 +6,14 @@ from scipy import stats
 from scipy.optimize import least_squares
 import time
 import pymc as pm
+import pytensor
+import pytensor.tensor as pt
+from pytensor.compile.ops import as_op
+import arviz as az
+from concurrent.futures import ProcessPoolExecutor
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+
 
 f_darcy = 0.02
 Cf = f_darcy/4
@@ -193,17 +201,17 @@ Y_mix = Ymix(Y_air, mdotAir, Y_H2, mdotH2)
 R_air = gas_properties(T_air, P_air, get_Y("O2:0.21, N2:0.79"))["R_specific"]
 R_H2 = gas_properties(T_H2, P_H2, get_Y("H2:1.0"))["R_specific"]
 R_mix = gas_properties(300, 101325, Y_mix)["R_specific"]
-print("R_air", R_air, "R_H2", R_H2, "R_mix", R_mix)
+#print("R_air", R_air, "R_H2", R_H2, "R_mix", R_mix)
 
 a1 = soS(T_air, R_air, gas_properties(T_air, P_air, get_Y("O2:0.21, N2:0.79"))["gamma"])
 a2 = soS(T_air2, R_air, gas_properties(T_air2, P_air, get_Y("O2:0.21, N2:0.79"))["gamma"])
 a3 = soS(T_H2, R_H2, gas_properties(T_H2, P_H2, get_Y("H2:1.0"))["gamma"])
-print("a1", a1, "a2", a2, "a3", a3)
+#print("a1", a1, "a2", a2, "a3", a3)
 
 uA = M1 * a1
 uA_2 = M2 * a2
 uB = M3 * a3
-print("uA", uA, "uA_2", uA_2, "uB", uB)
+#print("uA", uA, "uA_2", uA_2, "uB", uB)
 
 TstagA = T_air * (1 + ((gas_properties(T_air, P_air, get_Y("O2:0.21, N2:0.79"))["gamma"] - 1)/2) * M1**2)
 TstagB = T_H2 * (1 + ((gas_properties(T_H2, P_H2, get_Y("H2:1.0"))["gamma"] - 1)/2) * M3**2)
@@ -216,8 +224,8 @@ rho2 = mdot2_Air/(A_airInjs * uA_2)
 rho3 = mdot3_H2/(A_H2Injs * uB)
 
 M_h2 = (mdot3_H2/(rho3 * A_H2Injs))/a3
-print("M_h2", M_h2)
-print("rho1", rho1, "rho2", rho2, "rho3", rho3)
+#print("M_h2", M_h2)
+#print("rho1", rho1, "rho2", rho2, "rho3", rho3)
 
 A_CV_END = preburner_area #area at the end of the CV is the same as the area at the start of the preburner inlet.
     
@@ -337,9 +345,6 @@ def CV_toPreburner(u2,T2,uA,uB,TA,TB): #this is newton raphson for the CV it goe
 
         deltaU = u2/1e6  #the delta or perturbation will be updating as u2 and T2 update to make sure its not too big or too small.
         deltaT = T2/1e6
-
-
-
 
         dE1du = (E1_CV(u2 + deltaU, T2, uA, uB, TA, TB) - E1)/deltaU
         dE1dT = (E1_CV(u2, T2 + deltaT, uA, uB, TA, TB) - E1)/deltaT
@@ -551,19 +556,14 @@ def newtonRaphson_P(P_guess, Pstag, T, gamma):
 
         while lamda > 1e-3:
             P_new = P_guess - lamda * E/dEdP
-
             if P_new <= 0 or not np.isfinite(P_new) or P_new > 3*Pstag:
                 lamda *= 0.5
                 continue
-
             E_new = pressureResidual(Pstag, P_new, T, gamma)
-
             if np.isfinite(E_new) and abs(E_new) < abs(E):
                 accepted = True
                 break
-
             lamda *= 0.5
-
         if not accepted:
             raise RuntimeError("damping for pressure Newton Raphson failed")    
         
@@ -701,7 +701,6 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
 
 
 #Full Solver
-print("__________________________________________________")
 def solver(Preburner_TStag,Cf,scale, acceptedScale):
     global mdot,Vinj #making them global so that i can use them in rk45 and ode functions
     Vinj = 0
@@ -803,13 +802,13 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale):
         entropy.append(sCurrent)
 
         if MCurrent >= 0.99:
-            print("choked at x = ", xCurrent)
-            print("choked at region = ", geometry_regions(xCurrent))
+            #print("choked at x = ", xCurrent)
+            #print("choked at region = ", geometry_regions(xCurrent))
             break
         
-    if machNum[-1] <0.99:
-        print("flow did NOT CHOKE. final Mach number: ", machNum[-1])
-        print("x at end of solve: ", xList[-1])
+    #if machNum[-1] <0.99:
+        #print("flow did NOT CHOKE. final Mach number: ", machNum[-1])
+        #print("x at end of solve: ", xList[-1])
 
     #converting to np arrays
     V_List = np.array(velocities)
@@ -858,6 +857,12 @@ def chokedLocationResiduals(scale, Cf):
     residual = throat_loc - x_Choke  #we want this to be zero
     return residual
     
+def eval_scale(args):
+    scale, Cf = args
+    res = chokedLocationResiduals(scale, Cf)
+    return scale, res
+
+'''
 def scaling_InletPressure(Cf):
     max_scale = 1
     max_res = chokedLocationResiduals(max_scale, Cf)
@@ -867,27 +872,68 @@ def scaling_InletPressure(Cf):
     elif max_res < 0:
         dir = -1
 
-    for i in range(20):
+    scale_tests = [max_scale + dir * (i / 10) #array of scales
+                    for i in range(1, 21)]
+
+    jobs = [(scale,Cf) for scale in scale_tests] #creating an array of touples (scale and Cf)
+
+    with ProcessPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(eval_scale,jobs))
+
+    batchsize = 4
+
+    for cur_scale, cur_res in results:
         
-        cur_scale = max_scale + dir * (i/10)
-        
-        cur_res = chokedLocationResiduals(cur_scale, Cf)
-        if cur_res * max_res < 0:
+        if cur_res * prev_res < 0:
             print("bracket has been found")
             final_scale = cur_scale
-            print("scale", cur_scale, "residual", cur_res)
             return final_scale, prev_scale
         
-        else:
-            print("Scale = ", cur_scale, "Residual = ", cur_res)
-            prev_scale = cur_scale #doing this so that i can then return it when i find a bracket 
-            final_scale = None
+        prev_scale = cur_scale
+        prev_res = cur_res
 
     return final_scale,prev_scale    
+'''
 
-Start_Sweep = time.perf_counter()
+def scaling_InletPressure(Cf):
 
-high_scale,low_scale = scaling_InletPressure(0.005)
+    max_scale = 1.0
+    max_res = chokedLocationResiduals(max_scale, Cf)
+
+    if max_res > 0:
+        direction = 1
+    elif max_res < 0:
+        direction = -1
+    else:
+        return max_scale, max_scale
+
+    prev_scale = max_scale
+    prev_res = max_res
+
+    batch_size = 4
+
+    with ProcessPoolExecutor(max_workers=4) as executor:
+
+        for start_i in range(1, 21, batch_size):
+
+            scale_tests = [
+                max_scale + direction * (i / 10)
+                for i in range(start_i, min(start_i + batch_size, 21))
+            ]
+
+            jobs = [(scale, Cf) for scale in scale_tests]
+
+            results = list(executor.map(eval_scale, jobs))
+
+            for cur_scale, cur_res in results:
+
+                if cur_res * prev_res < 0:
+                    return cur_scale, prev_scale
+
+                prev_scale = cur_scale
+                prev_res = cur_res
+
+    return None, prev_scale
 
 def scale_bisec(scale_low, scale_high, Cf):
     res_low = chokedLocationResiduals(scale_low,Cf)
@@ -902,7 +948,7 @@ def scale_bisec(scale_low, scale_high, Cf):
         res_mid = chokedLocationResiduals(scale_mid,Cf)
 
         if abs(res_mid) < tol:
-            print("Scale", scale_mid, "Residual", res_mid)
+            #print("Scale", scale_mid, "Residual", res_mid)
             return scale_mid, res_mid
         
         if res_low * res_mid < 0:
@@ -912,21 +958,73 @@ def scale_bisec(scale_low, scale_high, Cf):
             res_low = res_mid
             scale_low = scale_mid
 
-final_scale,final_res = scale_bisec(low_scale,high_scale, 0.005)
 
+def scale_HybridNewBisec(scale_low, scale_high, Cf):
 
-resultsAtCorrectScale = solver(TstagA,Cf,final_scale,True)
-print("Preburner Inlet Conditions")
-print("Inlet Velocity", resultsAtCorrectScale["velocity"][0], "m/s")
-print("Inlet Pressure", resultsAtCorrectScale["pressure"][0] * 1e-6, "MPa")
-print("Inlet Mach Num", resultsAtCorrectScale["mach_number"][0])
+    res_low = chokedLocationResiduals(scale_low, Cf)
+    res_high = chokedLocationResiduals(scale_high, Cf)
 
+    tol = 1e-6
+    maxIters = 100
 
+    for i in range(maxIters):
 
+        # midpoint (always available as fallback)
+        scale_mid = 0.5 * (scale_low + scale_high)
+        res_mid = chokedLocationResiduals(scale_mid, Cf)
 
-End_Sweep = time.perf_counter()
+        if abs(res_mid) < tol:
+            return scale_mid, res_mid
 
-print("Total time for residual sweep: ", End_Sweep - Start_Sweep, "seconds")
+        d_scale = max(abs(scale_mid) * 1e-4, 1e-8)
+
+        res_next = chokedLocationResiduals(scale_mid + d_scale, Cf)
+        dRes_dScale = (res_next - res_mid) / d_scale
+
+        use_bisection = False
+
+        # Newton proposal
+        if abs(dRes_dScale) < 1e-12:
+            use_bisection = True
+
+        else:
+            scale_new = scale_mid - res_mid / dRes_dScale
+
+            # Reject Newton if it leaves bracket
+            if scale_new <= scale_low or scale_new >= scale_high:
+                use_bisection = True
+
+        # Choose point
+        if use_bisection:
+            scale_candidate = scale_mid
+            res_candidate = res_mid
+        else:
+            scale_candidate = scale_new
+            res_candidate = chokedLocationResiduals(scale_candidate, Cf)
+
+            # Optional: reject Newton if residual got worse
+            if abs(res_candidate) > abs(res_mid):
+                scale_candidate = scale_mid
+                res_candidate = res_mid
+
+        # Converged?
+        if abs(res_candidate) < tol:
+            return scale_candidate, res_candidate
+
+        # Update bracket
+        if res_low * res_candidate < 0:
+            scale_high = scale_candidate
+            res_high = res_candidate
+        else:
+            scale_low = scale_candidate
+            res_low = res_candidate
+
+        # Optional bracket-size convergence
+        if abs(scale_high - scale_low) < tol:
+            return scale_candidate, res_candidate
+
+    return scale_candidate, res_candidate
+
 '''
 plt.figure()
 plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["mach_number"])
@@ -959,39 +1057,107 @@ plt.show()
 
 
 '''
+
+
 #MCMC
 #using black box approach 
-chamber_P_Paper = 4.82633 * 1e6
 
-def log_likelihood(Cf):
-    high_scale,low_scale = scaling_InletPressure(Cf) #finding bracket 
-    final_scale,final_res = scale_bisec(low_scale,high_scale, Cf)   # finding exact scale 
-    resultsAtCorrectScale = solver(TstagA,Cf,final_scale,True) #getting exact values at correct scale 
-    chamber_P_Predicted =  resultsAtCorrectScale["pressure"][0]
+# wrapper for Op var. basically tells log_likelihood func that i am just putting in a double prec scalar and will
+# output a double precision scalar 
+# this is just so that i can easily pas my prior into my function 
 
-    log_prob = np.sum(stats.norm.logpdf(chamber_P_Paper,loc = chamber_P_Predicted,scale = chamber_P_Predicted * 0.2))
-    return log_prob
+chamber_P_Initial = None
 
+@as_op(itypes=[pt.dscalar],otypes=[pt.dscalar]) 
+def log_likelihood(Cf):    
 
-with pm.Model() as model:
-    #prior for Cf
-    prior_Cf = pm.Normal("Cf", mu=0.005, sigma=0.00125,lower = 0)
+    Cf = float(Cf)
+    try:
+        high_scale,low_scale = scaling_InletPressure(Cf) #finding bracket 
+        final_scale,final_res = scale_bisec(low_scale,high_scale, Cf)   # finding exact scale 
+        resultsAtCorrectScale = solver(TstagA,Cf,final_scale,True) #getting exact values at correct scale 
+
+        chamber_P_Predicted =  resultsAtCorrectScale["pressure"][0]
+
+        log_prob = stats.norm.logpdf(chamber_P_Initial,loc = chamber_P_Predicted,scale = chamber_P_Predicted * 0.1)
+
+        return np.array(log_prob, dtype=np.float64)
     
-    log_like = log_likelihood(prior_Cf)
+    except Exception:
+            print("Likelihood failed", Exception)
+            return np.array(-1.0e10, dtype=np.float64)
+#testing 
 
-    pm.Potential("Ini Chamber Pressure Likelihood",log_like)
-    
-    step = pm.DEMetropolisZ()
+if __name__ == '__main__':
+    True_Cf = 0.005
+    start_global = time.perf_counter()
+    start_sweep = time.perf_counter()
 
-    trace = pm.sample(
-        draws=2000,
-        tune=1000,
-        step = step,
-        chains=4
-    )
+    high_scale,low_scale = scaling_InletPressure(True_Cf) #finding bracket 
+    end_sweep = time.perf_counter()
+
+    start_bisection = time.perf_counter()
+    final_scale,final_res = scale_bisec(low_scale,high_scale, True_Cf)   # finding exact scale 
+    end_bisection = time.perf_counter()
+
+    start_Solver =  time.perf_counter()
+    resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True) #getting exact values at correct scale 
+    end_Solver =  time.perf_counter()
+
+    end_global = time.perf_counter()
+    chamber_P_Initial =  resultsAtCorrectScale["pressure"][0]
+
+
+    print(f"Sweep time: {end_sweep - start_sweep:.6f} s")
+    print(f"Bisection time: {end_bisection - start_bisection:.6f} s")
+    print(f"Solver time: {end_Solver - start_Solver:.6f} s")
+    print(f"Total time: {end_global - start_global:.6f} s")
 
 
 
+'''
+    with pm.Model() as model:
+        #prior for Cf
+        mu = 0.004
+        scale = 0.005 * 0.15
+        prior_Cf = pm.TruncatedNormal("Cf", mu=mu,  sigma=0.00125,lower = 0,initval=mu,default_transform=None)
+        
+        log_like = log_likelihood(prior_Cf)
+
+        pm.Potential("Initial Chamber Pressure Likelihood",log_like)
+        
+        step = pm.DEMetropolisZ(
+            vars = [prior_Cf],
+            S= np.array([scale]), 
+            scaling = 0.001,
+            tune="scaling",
+            tune_interval=100,
+            tune_drop_fraction=0.9
+        )
+
+        trace = pm.sample(
+            draws=50,
+            tune=20,
+            step = step,
+            chains=1,
+            cores = 1,
+            random_seed=42,
+            progressbar=True,
+            return_inferencedata=True,
+            compute_convergence_checks=True,
+        )
+
+    az.plot_trace(trace, var_names=["Cf"])
+    plt.savefig("Cf_trace.png", dpi=200)
+    plt.show()
+
+    az.plot_autocorr(trace, var_names=["Cf"])
+    plt.savefig("Cf_autocorr.png", dpi=200)
+    plt.show()
+'''
+#az.plot_posterior(trace, var_names=["Cf"], ref_val=True_Cf)
+#plt.savefig("Cf_posterior.png", dpi=200)
+#plt.show()
 
 #Other Stuff
 
