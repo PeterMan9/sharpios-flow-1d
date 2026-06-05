@@ -1,4 +1,6 @@
 import numpy as np
+import math
+
 import matplotlib.pyplot as plt
 from scipy.optimize import fsolve
 import cantera as ct
@@ -45,7 +47,7 @@ def dsmoothstep_dxi(xi):
 def geometry_regions(x):
     if x <= preburner_length:
         return "Preburner"
-    elif throat_loc - 0.005 <= x <= throat_loc + 0.005: 
+    elif throat_loc - 0.001 <= x <= throat_loc + 0.001: 
         return "Throat"
     elif x <= throat_loc:
         return "Conv Nozzle"
@@ -369,126 +371,6 @@ def CV_toPreburner(u2,T2,uA,uB,TA,TB): #this is newton raphson for the CV it goe
 
     return u2, T2
 
-
-
-def InjA_Loss_CV(Pstag_A2,uA_2, TA_2):
-    numIters = 0
-    tol = 1e-8
-
-    E5 = E5_InjA_CV(TA_2,uA_2)
-    E3 = E3_InjA_CV(Pstag_A2,uA_2, TA_2)
-
-    E_vec = np.array([E5, E3])
-
-    while(np.linalg.norm(E_vec, 2) >= tol and numIters <= 1000):
-
-        deltaU = max(abs(uA_2)*1e-6, 1e-3)
-        deltaT = max(abs(TA_2)*1e-6, 1e-3)
-
-        #partial derivatives for numerical jacobian
-        dE5du = (E5_InjA_CV(TA_2, uA_2+ deltaU) - E5)/deltaU
-        dE5dT = (E5_InjA_CV(TA_2 + deltaT, uA_2) - E5)/deltaT
-        dE3du = (E3_InjA_CV(Pstag_A2, uA_2 + deltaU, TA_2) - E3)/deltaU
-        dE3dT = (E3_InjA_CV(Pstag_A2, uA_2, TA_2 + deltaT) - E3)/deltaT
- 
-        J = np.array([[dE5du, dE5dT], [dE3du, dE3dT]])
-        deltas = np.linalg.solve(J, -E_vec)
-        old_norm = np.linalg.norm(E_vec, 2)
-
-        lamda = 1 # setting up damped newton raphson method so that I dont overshoot my initial couple steps 
-
-        while lamda > 1e-3:
-
-            uA_2Trial = uA_2 + lamda * deltas[0]
-            TA_2Trial = TA_2 + lamda * deltas[1]
-
-            if uA_2Trial <= 0 or TA_2Trial <= 0: #if statement to check to make sure i dont overstep and if i do, i dampin the step
-                lamda *=0.5
-                continue #this basically stops the code and forces it to restart at the top of the loop with an updated lamda 
-
-            E5_trial = E5_InjA_CV(TA_2Trial, uA_2Trial) #updating E5 and E3 values after updating u2 and T2 to check for convergence 
-            E3_trial = E3_InjA_CV(Pstag_A2, uA_2Trial, TA_2Trial) 
-            trial_norm = np.linalg.norm([E5_trial,E3_trial],2) #taking the L2 norm of this vector to basically get the magnitude of the residual equations  
-
-            #if i get a norm that is a number and it is smaller than my previous pre dampning norm i exit loop .
-            #if not i just make my lamda smaller
-            if np.isfinite(trial_norm) and trial_norm < old_norm: 
-                break                                               
-            
-            lamda *= 0.5
-        #updating values (u,T and residual eq and vector) from good newton step
-        uA_2 = uA_2Trial 
-        TA_2 = TA_2Trial
-        E5 = E5_trial
-        E3 = E3_trial
-        E_vec = np.array([E5, E3])
-
-        numIters += 1
-
-        if numIters > 1000 or not np.isfinite(uA_2) or not np.isfinite(TA_2) or TA_2 <= 0:
-            print("uA_2", uA_2, "TA_2", TA_2, "numIters", numIters)
-            raise RuntimeError("InjA solve failed")
-
-    return uA_2, TA_2
-
-def InjB_Loss_CV(Pstag_B2,uB_2, TB_2):
-    numIters = 0
-    tol = 1e-6
-
-    E4 = E4_InjB_CV(Pstag_B2,uB_2, TB_2)
-    E6 = E6_InjB_CV(TB_2,uB_2)
-    E_vec = np.array([E6, E4])
-
-    while(np.linalg.norm(E_vec, 2) >= tol and numIters <= 500):
-        deltaU = max(abs(uB_2)*1e-6, 1e-3)
-        deltaT = max(abs(TB_2)*1e-6, 1e-3)
-
-        #partial derivatives for numerical jacobian
-        dE6du = (E6_InjB_CV(TB_2, uB_2 + deltaU) - E6)/deltaU
-        dE6dT = (E6_InjB_CV(TB_2 + deltaT, uB_2) - E6)/deltaT
-        dE4du = (E4_InjB_CV(Pstag_B2, uB_2 + deltaU, TB_2) - E4)/deltaU
-        dE4dT = (E4_InjB_CV(Pstag_B2, uB_2, TB_2 + deltaT) - E4)/deltaT
-
-        J = np.array([[dE6du, dE6dT], [dE4du, dE4dT]])
-        deltas = np.linalg.solve(J, -E_vec)
-        old_norm = np.linalg.norm(E_vec, 2)
-
-        lamda = 1 # same as for inj A loss cv. just my dampning factor
-
-        while lamda > 1e-3:
-
-            uB_2Trial = uB_2 + lamda * deltas[0]
-            TB_2Trial = TB_2 + lamda * deltas[1]
-
-            if uB_2Trial <= 0 or TB_2Trial <= 0: #if statement to check to make sure i dont overstep and if i do, i dampin the step
-                lamda *=0.5
-                continue #this basically stops the code and forces it to restart at the top of the loop with an updated lamda 
-
-            E6_trial = E6_InjB_CV(TB_2Trial, uB_2Trial) #updating E6 and E4 values after updating u2 and T2 to check for convergence 
-            E4_trial = E4_InjB_CV(Pstag_B2, uB_2Trial, TB_2Trial) 
-            trial_norm = np.linalg.norm([E6_trial,E4_trial],2) #taking the L2 norm of this vector to basically get the magnitude of the residual equations  
-
-            #if i get a norm that is a number and it is smaller than my previous pre dampning norm i exit loop .
-            #if not i just make my lamda smaller
-            if np.isfinite(trial_norm) and trial_norm < old_norm: 
-                break                                               
-            
-            lamda *= 0.5
-        #updating values (u,T and residual eq and vector) from good newton step
-        uB_2 = uB_2Trial 
-        TB_2 = TB_2Trial
-        E6 = E6_trial
-        E4 = E4_trial
-        E_vec = np.array([E6, E4])
-
-        numIters += 1
-
-        if numIters > 500 or not np.isfinite(uB_2) or not np.isfinite(TB_2) or TB_2 <= 0:
-         print("uB_2", uB_2, "TB_2", TB_2, "numIters", numIters)
-         raise RuntimeError("InjB solve failed")
-        
-    return uB_2, TB_2
-
 def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx):
     numIters = 0
     tol = 1e-8
@@ -582,15 +464,21 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
     accepted = False 
     tol = 1e-6
     location = geometry_regions(x)
-
+    
     if location == "Preburner":
-        h = min(h, 1e-1)
+        local_tol = 1e-2
+        h_max = 1e-1
     elif location == "Conv Nozzle" or location == "Div Nozzle":
-        h = min(h, 5e-3)
+        local_tol = 1e-6
+        h_max =5e-3
     elif location == "Throat":
-        h = min(h, 1e-3)
-        
-    while (accepted != True):
+        local_tol = 1e-8
+        h_max = 1e-4
+
+    h = min(h,h_max)
+
+    while(accepted !=True):
+
         mdot_Current = mdotFuncX(x)
         mdot_Prev = mdotFuncX(x-h)
         x1 = x
@@ -676,12 +564,12 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         errorP = abs(p_5Order - p_4Order)
         err = max(errorV, errorP)
 
-        if errorV > V * tol or errorP > P * tol: #comparing error if either error are > than tol it means that step is too big so i am making it smaller 
+        if errorV > V * local_tol or errorP > P * local_tol: #comparing error if either error are > than tol it means that step is too big so i am making it smaller 
             accepted = False 
-            sV = 0.9*(tol/errorV)**(1/5)
-            sP = 0.9*(tol/errorP)**(1/5)
+            sV = 2 if errorV == 0 else 0.9*(tol/errorV)**(1/5)
+            sP = 2 if errorP == 0 else 0.9*(tol/errorP)**(1/5)
             s = min(sV, sP)
-            hUpdated = min(s * h, 1e-4)
+            hUpdated = min(s * h, h_max)
             h = hUpdated
             continue #this just restarts the loop with the updated h value
             
@@ -692,19 +580,16 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
             Tnext = newtonRaphson_T(T1, T1, x1, V1, Vnext, 1 * h)
             s = 2
 
-        if err == 0:
-            s = 2
 
-        hUpdated = min(s * h, 1e-4)
+        hUpdated = h
     
-    return xNext, Vnext, Pnext, Tnext,hUpdated, accepted
+    return xNext, Vnext, Pnext, Tnext,hUpdated, location
 
 
 #Full Solver
 def solver(Preburner_TStag,Cf,scale, acceptedScale):
     global mdot,Vinj #making them global so that i can use them in rk45 and ode functions
     Vinj = 0
-
    
     Preburner_T = Preburner_TStag #k
 
@@ -712,8 +597,6 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale):
     og_Preburner_P = newtonRaphson_P(Preburner_predictedPStag,Preburner_predictedPStag, Preburner_T, gas_properties(Preburner_T, 101325, Y_mix)["gamma"])
 
     if acceptedScale == False:
-      
-
         if scale ==1:
             Preburner_P = og_Preburner_P
         else:
@@ -729,10 +612,7 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale):
     elif acceptedScale == True:
         Preburner_P = og_Preburner_P * scale
         Preburner_gasProperties = gas_properties(Preburner_T, Preburner_P, Y_mix)
-
         Preburner_U = mdot_i/(Preburner_P * preburner_area / (R_mix * Preburner_T))
-
-
         M_Preburner_Inlet = Preburner_U/soS(Preburner_T,R_mix,Preburner_gasProperties["gamma"])
         rho_preburner = mdot_i/(preburner_area * Preburner_U)
         Preburner_Pstag = pressureStagFunc(Preburner_P,M_Preburner_Inlet,Preburner_gasProperties["gamma"])
@@ -750,14 +630,16 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale):
     areaRatio = [1.0]
 
     xList = [0.0] #this list starts at the preburner 
-    stepList = [preburner_length/1e2]
+    stepList = [1e-1]
     mdotList = [mdot_i]
     
     sInitial = gas_properties(Preburner_T, Preburner_P,Y_mix)["s"]
     entropy = [sInitial]
 
     mdotReconstructed = [mdot_i] #recontruction array to check if calcs are correct 
-
+    pb_count = 0
+    conv_count = 0
+    throat_count = 0
     while (xList[-1] < nozzle_exit ): #actual for loop for solving everything. from start of preburner to throat 
 
         xCurrent = xList[-1]     
@@ -766,8 +648,15 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale):
         Vbefore = velocities[-1]
         Pbefore = pressure[-1]
         Tbefore = temp [-1]
+        xNext, VCurrent, PCurrent, TCurrent, hNext, location = rk45Step(Vbefore,Pbefore, Cf,hCurrent, xCurrent,Tbefore)
         
-        xNext, VCurrent, PCurrent, TCurrent, hNext, accepted = rk45Step(Vbefore,Pbefore, Cf,hCurrent, xCurrent,Tbefore)
+        if location == "Preburner":
+            pb_count +=1
+        elif location == "Throat":
+            throat_count +=1 
+        else:
+            conv_count+=1
+
         currentMix_properties = gas_properties(TCurrent, PCurrent,Y_mix)
         currentMix_gamma = currentMix_properties["gamma"]
 
@@ -847,6 +736,9 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale):
         "Choked Area Ratio": Area_List[0]/Area_List[-1], 
         "Initial Pstag" : pStag_List[0],
         "Initial Tstag" : tStag_List[0],
+        "Preburner Count": pb_count,
+        "Conv Count": conv_count,
+        "throat Count": throat_count
     }
 
 #Sweeping
@@ -862,38 +754,6 @@ def eval_scale(args):
     res = chokedLocationResiduals(scale, Cf)
     return scale, res
 
-'''
-def scaling_InletPressure(Cf):
-    max_scale = 1
-    max_res = chokedLocationResiduals(max_scale, Cf)
-    
-    if max_res > 0:
-        dir = 1
-    elif max_res < 0:
-        dir = -1
-
-    scale_tests = [max_scale + dir * (i / 10) #array of scales
-                    for i in range(1, 21)]
-
-    jobs = [(scale,Cf) for scale in scale_tests] #creating an array of touples (scale and Cf)
-
-    with ProcessPoolExecutor(max_workers=4) as executor:
-            results = list(executor.map(eval_scale,jobs))
-
-    batchsize = 4
-
-    for cur_scale, cur_res in results:
-        
-        if cur_res * prev_res < 0:
-            print("bracket has been found")
-            final_scale = cur_scale
-            return final_scale, prev_scale
-        
-        prev_scale = cur_scale
-        prev_res = cur_res
-
-    return final_scale,prev_scale    
-'''
 
 def scaling_InletPressure(Cf):
 
@@ -910,9 +770,9 @@ def scaling_InletPressure(Cf):
     prev_scale = max_scale
     prev_res = max_res
 
-    batch_size = 4
+    batch_size = 5
 
-    with ProcessPoolExecutor(max_workers=4) as executor:
+    with ProcessPoolExecutor(max_workers=5) as executor:
 
         for start_i in range(1, 21, batch_size):
 
@@ -928,90 +788,62 @@ def scaling_InletPressure(Cf):
             for cur_scale, cur_res in results:
 
                 if cur_res * prev_res < 0:
-                    return cur_scale, prev_scale
+                    return cur_scale, prev_scale, cur_res, prev_res
 
                 prev_scale = cur_scale
                 prev_res = cur_res
 
     return None, prev_scale
 
-def scale_bisec(scale_low, scale_high, Cf):
-    res_low = chokedLocationResiduals(scale_low,Cf)
-    res_high = chokedLocationResiduals(scale_high,Cf)
-    tol = 1e-6
-
-    maxIters = 100
-
-    for i in range(maxIters):
-
-        scale_mid = 0.5 * (scale_low + scale_high)
-        res_mid = chokedLocationResiduals(scale_mid,Cf)
-
-        if abs(res_mid) < tol:
-            #print("Scale", scale_mid, "Residual", res_mid)
-            return scale_mid, res_mid
-        
-        if res_low * res_mid < 0:
-            res_high = res_mid
-            scale_high = scale_mid
-        else:
-            res_low = res_mid
-            scale_low = scale_mid
-
-
-def scale_HybridNewBisec(scale_low, scale_high, Cf):
-
-    res_low = chokedLocationResiduals(scale_low, Cf)
-    res_high = chokedLocationResiduals(scale_high, Cf)
+def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf):
 
     tol = 1e-6
     maxIters = 100
+    min_fraction = 0.10   # reject secant points too close to bracket edges
+
+    best_scale = scale_low if abs(res_low) < abs(res_high) else scale_high
+    best_res = res_low if abs(res_low) < abs(res_high) else res_high
+
+    scale_candidate = best_scale
+    res_candidate = best_res
 
     for i in range(maxIters):
 
-        # midpoint (always available as fallback)
-        scale_mid = 0.5 * (scale_low + scale_high)
-        res_mid = chokedLocationResiduals(scale_mid, Cf)
+        width = scale_high - scale_low
 
-        if abs(res_mid) < tol:
-            return scale_mid, res_mid
+        # Secant / false-position proposal
+        secant_denom = res_high - res_low
 
-        d_scale = max(abs(scale_mid) * 1e-4, 1e-8)
+        if abs(secant_denom) > 1e-14:
+            scale_candidate = (
+                scale_high
+                - res_high * (scale_high - scale_low) / secant_denom
+            )
 
-        res_next = chokedLocationResiduals(scale_mid + d_scale, Cf)
-        dRes_dScale = (res_next - res_mid) / d_scale
-
-        use_bisection = False
-
-        # Newton proposal
-        if abs(dRes_dScale) < 1e-12:
-            use_bisection = True
+            # Guard: reject bad or endpoint-hugging secant proposals
+            if (
+                not np.isfinite(scale_candidate)
+                or not (scale_low < scale_candidate < scale_high)
+                or scale_candidate < scale_low + min_fraction * width
+                or scale_candidate > scale_high - min_fraction * width
+            ):
+                scale_candidate = 0.5 * (scale_low + scale_high)
 
         else:
-            scale_new = scale_mid - res_mid / dRes_dScale
+            scale_candidate = 0.5 * (scale_low + scale_high)
 
-            # Reject Newton if it leaves bracket
-            if scale_new <= scale_low or scale_new >= scale_high:
-                use_bisection = True
+        res_candidate = chokedLocationResiduals(scale_candidate, Cf)
 
-        # Choose point
-        if use_bisection:
-            scale_candidate = scale_mid
-            res_candidate = res_mid
-        else:
-            scale_candidate = scale_new
-            res_candidate = chokedLocationResiduals(scale_candidate, Cf)
+        # Track best residual seen
+        if abs(res_candidate) < abs(best_res):
+            best_scale = scale_candidate
+            best_res = res_candidate
 
-            # Optional: reject Newton if residual got worse
-            if abs(res_candidate) > abs(res_mid):
-                scale_candidate = scale_mid
-                res_candidate = res_mid
-
-        # Converged?
+        # Residual convergence
         if abs(res_candidate) < tol:
             return scale_candidate, res_candidate
 
-        # Update bracket
+        # Update bracket by sign
         if res_low * res_candidate < 0:
             scale_high = scale_candidate
             res_high = res_candidate
@@ -1019,11 +851,11 @@ def scale_HybridNewBisec(scale_low, scale_high, Cf):
             scale_low = scale_candidate
             res_low = res_candidate
 
-        # Optional bracket-size convergence
+        # Bracket-size convergence
         if abs(scale_high - scale_low) < tol:
-            return scale_candidate, res_candidate
+            return best_scale, best_res
 
-    return scale_candidate, res_candidate
+    return best_scale, best_res
 
 '''
 plt.figure()
@@ -1074,7 +906,7 @@ def log_likelihood(Cf):
     Cf = float(Cf)
     try:
         high_scale,low_scale = scaling_InletPressure(Cf) #finding bracket 
-        final_scale,final_res = scale_bisec(low_scale,high_scale, Cf)   # finding exact scale 
+        final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, Cf)   # finding exact scale 
         resultsAtCorrectScale = solver(TstagA,Cf,final_scale,True) #getting exact values at correct scale 
 
         chamber_P_Predicted =  resultsAtCorrectScale["pressure"][0]
@@ -1093,12 +925,12 @@ if __name__ == '__main__':
     start_global = time.perf_counter()
     start_sweep = time.perf_counter()
 
-    high_scale,low_scale = scaling_InletPressure(True_Cf) #finding bracket 
+    high_scale,low_scale,high_res, low_res = scaling_InletPressure(True_Cf) #finding bracket 
     end_sweep = time.perf_counter()
 
-    start_bisection = time.perf_counter()
-    final_scale,final_res = scale_bisec(low_scale,high_scale, True_Cf)   # finding exact scale 
-    end_bisection = time.perf_counter()
+    start_root = time.perf_counter()
+    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
+    end_root = time.perf_counter()
 
     start_Solver =  time.perf_counter()
     resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True) #getting exact values at correct scale 
@@ -1106,13 +938,21 @@ if __name__ == '__main__':
 
     end_global = time.perf_counter()
     chamber_P_Initial =  resultsAtCorrectScale["pressure"][0]
-
+    print("num steps",len(resultsAtCorrectScale["x"]))
+    print("P Count", resultsAtCorrectScale["Preburner Count"], "C Count", resultsAtCorrectScale["Conv Count"],"T Count",  resultsAtCorrectScale["throat Count"])
 
     print(f"Sweep time: {end_sweep - start_sweep:.6f} s")
-    print(f"Bisection time: {end_bisection - start_bisection:.6f} s")
+    print(f"Hybrid time: {end_root - start_root:.6f} s")
     print(f"Solver time: {end_Solver - start_Solver:.6f} s")
     print(f"Total time: {end_global - start_global:.6f} s")
 
+
+    plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["entropy"])
+    plt.xlabel("X")
+    plt.ylabel("mach num")
+    plt.title("X vs Mach num")
+    plt.grid()
+    plt.show()
 
 
 '''
