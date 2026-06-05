@@ -938,24 +938,16 @@ if __name__ == '__main__':
 
     end_global = time.perf_counter()
     chamber_P_Initial =  resultsAtCorrectScale["pressure"][0]
-    print("num steps",len(resultsAtCorrectScale["x"]))
-    print("P Count", resultsAtCorrectScale["Preburner Count"], "C Count", resultsAtCorrectScale["Conv Count"],"T Count",  resultsAtCorrectScale["throat Count"])
+    
+    #print("num steps",len(resultsAtCorrectScale["x"]))
+    #print("P Count", resultsAtCorrectScale["Preburner Count"], "C Count", resultsAtCorrectScale["Conv Count"],"T Count",  resultsAtCorrectScale["throat Count"])
 
-    print(f"Sweep time: {end_sweep - start_sweep:.6f} s")
-    print(f"Hybrid time: {end_root - start_root:.6f} s")
-    print(f"Solver time: {end_Solver - start_Solver:.6f} s")
-    print(f"Total time: {end_global - start_global:.6f} s")
-
-
-    plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["entropy"])
-    plt.xlabel("X")
-    plt.ylabel("mach num")
-    plt.title("X vs Mach num")
-    plt.grid()
-    plt.show()
+    #print(f"Sweep time: {end_sweep - start_sweep:.6f} s")
+    #print(f"Hybrid time: {end_root - start_root:.6f} s")
+    #print(f"Solver time: {end_Solver - start_Solver:.6f} s")
+    #print(f"Total time: {end_global - start_global:.6f} s")
 
 
-'''
     with pm.Model() as model:
         #prior for Cf
         mu = 0.004
@@ -994,7 +986,7 @@ if __name__ == '__main__':
     az.plot_autocorr(trace, var_names=["Cf"])
     plt.savefig("Cf_autocorr.png", dpi=200)
     plt.show()
-'''
+
 #az.plot_posterior(trace, var_names=["Cf"], ref_val=True_Cf)
 #plt.savefig("Cf_posterior.png", dpi=200)
 #plt.show()

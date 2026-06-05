@@ -1,0 +1,17 @@
+name: CFD
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12.9
+  - numpy
+  - matplotlib
+  - scipy
+  - cantera>=3.0
+  - mpi4py
+  - pymc>=5
+  - pip
+  - gxx
+  #- pip:
+    #- rtree
+    #- pymsis
+    #- ./SDToolbox # Forced to use local version of SDToolbox unfortunately, as there is no repo
