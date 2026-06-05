@@ -950,7 +950,7 @@ if __name__ == '__main__':
 
     with pm.Model() as model:
         #prior for Cf
-        mu = 0.004
+        mu = 0.005
         scale = 0.005 * 0.15
         prior_Cf = pm.TruncatedNormal("Cf", mu=mu,  sigma=0.00125,lower = 0,initval=mu,default_transform=None)
         
@@ -961,31 +961,69 @@ if __name__ == '__main__':
         step = pm.DEMetropolisZ(
             vars = [prior_Cf],
             S= np.array([scale]), 
-            scaling = 0.001,
+            scaling = 0.01,
             tune="scaling",
             tune_interval=100,
             tune_drop_fraction=0.9
         )
 
         trace = pm.sample(
-            draws=50,
-            tune=20,
+            draws=3000,
+            tune=1000,
             step = step,
-            chains=1,
-            cores = 1,
+            chains=4,
+            cores = 4,
             random_seed=42,
             progressbar=True,
             return_inferencedata=True,
             compute_convergence_checks=True,
         )
 
+    summary = az.summary(trace, var_names=["Cf"])
+    print(summary)
+
+    cf_samples = trace.posterior["Cf"].values.flatten()
+
+    print("True_Cf:", True_Cf)
+    print("Posterior mean:", np.mean(cf_samples))
+    print("Posterior median:", np.median(cf_samples))
+    print("5%-95%:", np.quantile(cf_samples, [0.05, 0.95]))
+
+    # 1. trace plot
     az.plot_trace(trace, var_names=["Cf"])
+    plt.title("Trace Plot")
+    plt.tight_layout()
     plt.savefig("Cf_trace.png", dpi=200)
     plt.show()
 
+    # 2. posterior plot with true value
+    az.plot_dist(trace, var_names=["Cf"])
+    plt.title("Posterior Plot")
+    plt.tight_layout()
+    plt.savefig("Cf_posterior.png", dpi=200)
+    plt.show()
+
+    # 3. autocorrelation plot
     az.plot_autocorr(trace, var_names=["Cf"])
+    plt.title("AutoCorrelationPlot")
+    plt.tight_layout()
     plt.savefig("Cf_autocorr.png", dpi=200)
     plt.show()
+
+    # 4. running mean plot
+    running_mean = np.cumsum(cf_samples) / np.arange(1, len(cf_samples) + 1)
+
+    plt.figure()
+    plt.plot(running_mean)
+    plt.axhline(True_Cf, linestyle="--", label="True Cf")
+    plt.xlabel("Sample")
+    plt.ylabel("Running mean of Cf")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("Cf_running_mean.png", dpi=200)
+    plt.show()
+
 
 #az.plot_posterior(trace, var_names=["Cf"], ref_val=True_Cf)
 #plt.savefig("Cf_posterior.png", dpi=200)
