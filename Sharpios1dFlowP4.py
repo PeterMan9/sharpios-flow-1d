@@ -14,6 +14,7 @@ from pytensor.compile.ops import as_op
 import arviz as az
 from concurrent.futures import ProcessPoolExecutor
 import warnings
+from datetime import datetime
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 
@@ -911,7 +912,7 @@ def log_likelihood(Cf):
 
         chamber_P_Predicted =  resultsAtCorrectScale["pressure"][0]
 
-        log_prob = stats.norm.logpdf(chamber_P_Initial,loc = chamber_P_Predicted,scale = chamber_P_Predicted * 0.1)
+        log_prob = stats.norm.logpdf(chamber_P_Initial,loc = chamber_P_Predicted,scale = chamber_P_Predicted * 0.01)
 
         return np.array(log_prob, dtype=np.float64)
     
@@ -948,11 +949,31 @@ if __name__ == '__main__':
     #print(f"Total time: {end_global - start_global:.6f} s")
 
 
+
     with pm.Model() as model:
         #prior for Cf
-        mu = 0.005
-        scale = 0.005 * 0.15
-        prior_Cf = pm.TruncatedNormal("Cf", mu=mu,  sigma=0.00125,lower = 0,initval=mu,default_transform=None)
+        set_sigma = True_Cf * 0.4
+        set_mu = 0.004 #setting prior mean to be about 1 STD from true mean 
+
+        set_draws = 2000
+        set_tune = 1000
+        set_chains = 10
+        set_cores = 10
+        timestamp = datetime.now().strftime("%d%m%Y_%H%M")
+
+        run_label = (
+            f"{timestamp}"
+            f"draws{set_draws}_"
+            f"tunes{set_tune}_"
+            f"chains{set_chains}_"
+            f"cores{set_cores}_"
+        )
+        
+        scale = 0.001 #magnitude of param
+        scaling = 0.8
+
+
+        prior_Cf = pm.TruncatedNormal("Cf", mu=set_mu,  sigma=set_sigma,lower = 0,initval=set_mu,default_transform=None)
         
         log_like = log_likelihood(prior_Cf)
 
@@ -961,28 +982,45 @@ if __name__ == '__main__':
         step = pm.DEMetropolisZ(
             vars = [prior_Cf],
             S= np.array([scale]), 
-            scaling = 0.01,
+            scaling = scaling, #Initial scale factor for how aggressive the sampler jumps and stuff
             tune="scaling",
             tune_interval=100,
             tune_drop_fraction=0.9
         )
 
         trace = pm.sample(
-            draws=3000,
-            tune=1000,
+            draws=set_draws,
+            tune=set_tune,
             step = step,
-            chains=4,
-            cores = 4,
+            chains=set_chains,
+            cores = set_cores,
             random_seed=42,
             progressbar=True,
             return_inferencedata=True,
             compute_convergence_checks=True,
         )
 
+       
     summary = az.summary(trace, var_names=["Cf"])
     print(summary)
 
     cf_samples = trace.posterior["Cf"].values.flatten()
+
+    with open(f"MCMC_report_{run_label}.txt","w") as f:
+
+        f.write("Settings:\n")
+        f.write(f"Truce CF = {True_Cf}\n")
+        f.write(f"Prior Mean = {set_mu}\n")
+        f.write(f"Draws = {set_draws}\n")
+        f.write(f"Tune = {set_tune}\n")
+        f.write(f"Chains = {set_chains}\n")
+        f.write(f"Cores = {set_cores}\n")
+        f.write(f"Scale = {scale}\n")
+        f.write(f"Scaling = {scaling}\n")
+
+        f.write("ARVIZ SUmmary\n")
+        f.write("---------------------\n")
+        f.write(summary.to_string())
 
     print("True_Cf:", True_Cf)
     print("Posterior mean:", np.mean(cf_samples))
@@ -993,21 +1031,21 @@ if __name__ == '__main__':
     az.plot_trace(trace, var_names=["Cf"])
     plt.title("Trace Plot")
     plt.tight_layout()
-    plt.savefig("Cf_trace.png", dpi=200)
+    plt.savefig(f"Cf_trace_{run_label}.png", dpi=200)
     plt.show()
 
     # 2. posterior plot with true value
     az.plot_dist(trace, var_names=["Cf"])
     plt.title("Posterior Plot")
     plt.tight_layout()
-    plt.savefig("Cf_posterior.png", dpi=200)
+    plt.savefig(f"Cf_posterior_{run_label}.png", dpi=200)
     plt.show()
 
     # 3. autocorrelation plot
     az.plot_autocorr(trace, var_names=["Cf"])
     plt.title("AutoCorrelationPlot")
     plt.tight_layout()
-    plt.savefig("Cf_autocorr.png", dpi=200)
+    plt.savefig(f"Cf_autocorr_{run_label}.png", dpi=200)
     plt.show()
 
     # 4. running mean plot
@@ -1021,13 +1059,8 @@ if __name__ == '__main__':
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig("Cf_running_mean.png", dpi=200)
+    plt.savefig(f"Cf_running_mean_{run_label}.png", dpi=200)
     plt.show()
-
-
-#az.plot_posterior(trace, var_names=["Cf"], ref_val=True_Cf)
-#plt.savefig("Cf_posterior.png", dpi=200)
-#plt.show()
 
 #Other Stuff
 
