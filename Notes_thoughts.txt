@@ -1,0 +1,28 @@
+work flow of scale tuning 
+scale inlet pressure 
+	basically find a bracket in which i choke at the throat 
+hybrid bisection and secant method 
+	find the root of the scale 
+	find exact scale 
+final results 
+	get final/exact values for pressures based of tuned scale 
+
+
+with mcmc 
+goal is to see if i can recover to true mean 
+	
+
+plug in cf 
+into scale tunning and i get out a my values (initial and final pressure) 
+
+what i realized is that if i keep tuning my scale and stuff i just compensate for the Cf so its better to just keep a find the true scale and then keep it constant constant and then compare the pressure loss from the initial chamber pressure and final chamber pressure and see if i can recover a Cf that is equal to my true Cf value 
+
+
+
+did some debugging and etc and found that my likelihood is basically flat. which means that my best Cf value is maybe like a couple % more likely than my worst
+i also plotted my changed in pressure at each Cf and the change in pressure from first and last tested Cf is only 3% to 4%.
+this means that my posterior 
+
+
+so to sum up my likelihood is very flat for all of the tested Cf values which basically means that at all of the Cfs are very likely for the given data. 
+This makes my posterior looks like my prior and explains why i would just converge/approach my prior mean rather than true mean/value. 

@@ -1,0 +1,13 @@
+Settings:
+Truce CF = 0.005
+Prior Mean = 0.0047
+Draws = 1000
+Tune = 500
+Chains = 5
+Cores = 5
+Scale = 0.001
+Scaling = 1
+ARVIZ SUmmary
+---------------------
+      mean       sd eti89_lb eti89_ub  ess_bulk  ess_tail r_hat mcse_mean  mcse_sd
+Cf  0.0047  0.00193   0.0016   0.0079      1096      1084  1.00   5.8e-05  3.8e-05

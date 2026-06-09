@@ -858,39 +858,6 @@ def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf):
 
     return best_scale, best_res
 
-'''
-plt.figure()
-plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["mach_number"])
-plt.xlabel("x (m)")
-plt.ylabel("Mach Number")
-plt.title("Mach Number vs x")
-plt.grid()
-
-plt.figure()
-plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["temperature_stag"])
-plt.xlabel("x (m)")
-plt.ylabel("Stagnation Temperature")
-plt.title("Stagnation Temperature vs x")
-plt.grid()
-
-plt.figure()
-plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["pressure_stag"])
-plt.xlabel("x (m)")
-plt.ylabel("Stagnation Pressure")
-plt.title("Stagnation Pressure vs x")
-plt.grid()
-
-plt.figure()
-plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["entropy"])
-plt.xlabel("x (m)")
-plt.ylabel("Entropy")
-plt.title("Entropy vs x")
-plt.grid()
-plt.show()
-
-
-'''
-
 
 #MCMC
 #using black box approach 
@@ -899,20 +866,78 @@ plt.show()
 # output a double precision scalar 
 # this is just so that i can easily pas my prior into my function 
 
-chamber_P_Initial = None
+dP_True = None
+True_Scale = None
+'''
+if __name__ == '__main__':
 
+    True_Cf = 0.005
+    Cf_grid = np.linspace(True_Cf - 0.002, True_Cf + 0.002, 500)
+    logplist = []
+    dPlist = []
+    start_sweep = time.perf_counter()
+    high_scale,low_scale,high_res, low_res = scaling_InletPressure(True_Cf) #finding bracket 
+    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
+
+    resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True) #getting exact values at correct scale 
+
+    trueIPressure = resultsAtCorrectScale["pressure"][0]
+    trueFPressure = resultsAtCorrectScale["pressure"][-1]
+    dP_true = trueIPressure - trueFPressure 
+
+    for Cf_try in Cf_grid:
+
+        try:
+            resultsAtCorrectScale = solver(TstagA,Cf_try,final_scale,True) #getting exact values at correct scale 
+
+            Initial_chamerP_Predicted =  resultsAtCorrectScale["pressure"][0]
+            Final_chamerP_Predicted = resultsAtCorrectScale["pressure"][-1]
+
+            dP_Predicted = Initial_chamerP_Predicted - Final_chamerP_Predicted
+            dPlist.append(dP_Predicted)
+
+            logp = stats.norm.logpdf(dP_true, loc = dP_Predicted, scale = dP_true * 0.01)
+            logplist.append(logp)
+
+        except Exception:
+            print(Exception)
+
+
+
+    logp_array = np.array(logplist)
+    Cf_list = Cf_grid[:len(logp_array)]
+    dP_array = np.array(dPlist)
+
+    
+    plt.figure()
+    plt.plot(Cf_list,dP_array * 1e-6)
+    plt.xlabel("Cf Values")
+    plt.ylabel("dP MPa")
+    plt.grid()
+
+
+    plt.figure()
+    plt.plot(Cf_list,logp_array)
+    plt.xlabel("Cf Values")
+    plt.ylabel("Log Likelihood")
+    plt.grid()
+    plt.show()
+
+
+'''
 @as_op(itypes=[pt.dscalar],otypes=[pt.dscalar]) 
 def log_likelihood(Cf):    
 
     Cf = float(Cf)
     try:
-        high_scale,low_scale = scaling_InletPressure(Cf) #finding bracket 
-        final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, Cf)   # finding exact scale 
-        resultsAtCorrectScale = solver(TstagA,Cf,final_scale,True) #getting exact values at correct scale 
+   
+        resultsAtCorrectScale = solver(TstagA,Cf,True_Scale,True) #getting exact values at correct scale
 
-        chamber_P_Predicted =  resultsAtCorrectScale["pressure"][0]
+        Initial_chamberP_Predicted =  resultsAtCorrectScale["pressure"][0]
+        Final_chamberP_Predicted =  resultsAtCorrectScale["pressure"][-1]
+        dP_Predicted = Final_chamberP_Predicted - Initial_chamberP_Predicted
 
-        log_prob = stats.norm.logpdf(chamber_P_Initial,loc = chamber_P_Predicted,scale = chamber_P_Predicted * 0.01)
+        log_prob = stats.norm.logpdf(dP_True,loc = dP_Predicted,scale = dP_Predicted * 0.05)
 
         return np.array(log_prob, dtype=np.float64)
     
@@ -923,40 +948,22 @@ def log_likelihood(Cf):
 
 if __name__ == '__main__':
     True_Cf = 0.005
-    start_global = time.perf_counter()
-    start_sweep = time.perf_counter()
-
     high_scale,low_scale,high_res, low_res = scaling_InletPressure(True_Cf) #finding bracket 
-    end_sweep = time.perf_counter()
-
-    start_root = time.perf_counter()
     final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
-    end_root = time.perf_counter()
-
-    start_Solver =  time.perf_counter()
     resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True) #getting exact values at correct scale 
-    end_Solver =  time.perf_counter()
 
-    end_global = time.perf_counter()
-    chamber_P_Initial =  resultsAtCorrectScale["pressure"][0]
-    
-    #print("num steps",len(resultsAtCorrectScale["x"]))
-    #print("P Count", resultsAtCorrectScale["Preburner Count"], "C Count", resultsAtCorrectScale["Conv Count"],"T Count",  resultsAtCorrectScale["throat Count"])
-
-    #print(f"Sweep time: {end_sweep - start_sweep:.6f} s")
-    #print(f"Hybrid time: {end_root - start_root:.6f} s")
-    #print(f"Solver time: {end_Solver - start_Solver:.6f} s")
-    #print(f"Total time: {end_global - start_global:.6f} s")
-
-
+    True_Scale = final_scale
+    True_chamberP_Initial = resultsAtCorrectScale["pressure"][0]
+    True_chamberP_Final =  resultsAtCorrectScale["pressure"][-1]
+    dP_True = True_chamberP_Final-True_chamberP_Initial
 
     with pm.Model() as model:
         #prior for Cf
-        set_sigma = True_Cf * 0.4
-        set_mu = 0.004 #setting prior mean to be about 1 STD from true mean 
+        set_sigma = True_Cf * 0.1
+        set_mu = 0.0046
 
-        set_draws = 2000
-        set_tune = 1000
+        set_draws = 50
+        set_tune = 10
         set_chains = 10
         set_cores = 10
         timestamp = datetime.now().strftime("%d%m%Y_%H%M")
@@ -970,8 +977,7 @@ if __name__ == '__main__':
         )
         
         scale = 0.001 #magnitude of param
-        scaling = 0.8
-
+        scaling = 1
 
         prior_Cf = pm.TruncatedNormal("Cf", mu=set_mu,  sigma=set_sigma,lower = 0,initval=set_mu,default_transform=None)
         
@@ -993,14 +999,16 @@ if __name__ == '__main__':
             tune=set_tune,
             step = step,
             chains=set_chains,
-            cores = set_cores,
-            random_seed=42,
+            cores = set_cores, 
             progressbar=True,
             return_inferencedata=True,
             compute_convergence_checks=True,
         )
 
-       
+    
+    accepted = trace.sample_stats["accepted"].values
+    print(list(trace.sample_stats.data.vars))
+    
     summary = az.summary(trace, var_names=["Cf"])
     print(summary)
 
@@ -1061,6 +1069,9 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.savefig(f"Cf_running_mean_{run_label}.png", dpi=200)
     plt.show()
+
+
+
 
 #Other Stuff
 
