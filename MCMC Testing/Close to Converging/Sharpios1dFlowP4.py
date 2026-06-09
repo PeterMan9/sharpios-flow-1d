@@ -55,7 +55,7 @@ def geometry_regions(x):
     elif x <= nozzle_exit:
         return "Div Nozzle"
     else:
-        return "Test Section"
+        return "outside"
 
 def geom_Area(x):
     if x <= preburner_length:
@@ -588,7 +588,7 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
 
 
 #Full Solver
-def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
+def solver(Preburner_TStag,Cf,scale, acceptedScale):
     global mdot,Vinj #making them global so that i can use them in rk45 and ode functions
     Vinj = 0
    
@@ -690,13 +690,12 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
 
         sCurrent = currentMix_properties["s"]
         entropy.append(sCurrent)
-        if postThroatSolve == False:
-            if MCurrent >= 0.99:
-                break
-        else:
-            if MCurrent >= 0.99:
-                print("choked at x = ", xCurrent)
 
+        if MCurrent >= 0.99:
+            #print("choked at x = ", xCurrent)
+            #print("choked at region = ", geometry_regions(xCurrent))
+            break
+        
     #if machNum[-1] <0.99:
         #print("flow did NOT CHOKE. final Mach number: ", machNum[-1])
         #print("x at end of solve: ", xList[-1])
@@ -724,7 +723,7 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
         "pressure": P_List,
         "temperature": T_List,
         "density": rho_List,
-        "Mach": M_List,
+        "mach_number": M_List,
         "pressure_stag": pStag_List,
         "temperature_stag": tStag_List,
         "x": x_used_List,
@@ -746,7 +745,7 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
 #Sweeping
 
 def chokedLocationResiduals(scale, Cf):
-    results = solver(TstagA,Cf,scale,False,False)
+    results = solver(TstagA,Cf,scale,False)
     x_Choke = results["x"][-1]
     residual = throat_loc - x_Choke  #we want this to be zero
     return residual
@@ -859,19 +858,6 @@ def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf):
 
     return best_scale, best_res
 
-True_Cf = 0.005
-if __name__ == '__main__':
-    high_scale,low_scale,high_res, low_res = scaling_InletPressure(True_Cf) #finding bracket 
-    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
-
-    resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
-
-    plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["Mach"])
-    plt.xlabel("Position ")
-    plt.ylabel("Mach Number ")
-    plt.grid()
-    plt.show()
-
 
 #MCMC
 #using black box approach 
@@ -882,7 +868,6 @@ if __name__ == '__main__':
 
 dP_True = None
 True_Scale = None
-
 '''
 if __name__ == '__main__':
 
@@ -939,7 +924,7 @@ if __name__ == '__main__':
     plt.show()
 
 
-
+'''
 @as_op(itypes=[pt.dscalar],otypes=[pt.dscalar]) 
 def log_likelihood(Cf):    
 
@@ -959,10 +944,7 @@ def log_likelihood(Cf):
     except Exception:
             print("Likelihood failed", Exception)
             return np.array(-1.0e10, dtype=np.float64)
-    
-
-
-#MCMC Model
+#testing 
 
 if __name__ == '__main__':
     True_Cf = 0.005
@@ -995,7 +977,7 @@ if __name__ == '__main__':
         )
         
         scale = 0.001 #magnitude of param
-        scaling = 2
+        scaling = 4
 
         prior_Cf = pm.TruncatedNormal("Cf", mu=set_mu,  sigma=set_sigma,lower = 0,initval=set_mu,default_transform=None)
         
@@ -1099,7 +1081,7 @@ if __name__ == '__main__':
     plt.savefig(f"Cf_running_mean_{run_label}.png", dpi=200)
     plt.show()
 
-'''
+
 
 
 #Other Stuff
