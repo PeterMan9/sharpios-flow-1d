@@ -13,6 +13,7 @@ import pytensor.tensor as pt
 from pytensor.compile.ops import as_op
 import arviz as az
 from concurrent.futures import ProcessPoolExecutor
+
 import warnings
 from datetime import datetime
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -48,7 +49,7 @@ def dsmoothstep_dxi(xi):
 def geometry_regions(x):
     if x <= preburner_length:
         return "Preburner"
-    elif throat_loc - 0.001 <= x <= throat_loc + 0.001: 
+    elif throat_loc <= x <= throat_loc + 0.005: 
         return "Throat"
     elif x <= throat_loc:
         return "Conv Nozzle"
@@ -282,6 +283,16 @@ def pstag_predicted(mdot,Astar,Tstag,gamma):
     Pstag_pred = mdot * (np.sqrt(Tstag)/Astar) / (np.sqrt(gamma / R_mix) * ((gamma + 1)/2)**(-(gamma + 1)/(2*(gamma-1))))
     return Pstag_pred
 
+def stagtostatic(Pstag,Tstag, M, gamma):
+    middleTerm = (1 + ((gamma -1)/2) * M**2)
+    P = Pstag * middleTerm **(- gamma/(gamma - 1))
+    T = Tstag * middleTerm ** (-1)
+    return P,T
+
+
+
+
+
 #Mixing Equations
 def E1_CV(ui,Ti,uA,uB,TA,TB):
     return ui - (mdotAir/mdot_i) * uA - (mdotH2/mdot_i) * uB - (mdotAir * R_air * TA)/(mdot_i * uA) - (mdotH2 * R_H2 * TB)/(mdot_i * uB) + (R_mix * Ti)/ui
@@ -479,7 +490,6 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
     h = min(h,h_max)
 
     while(accepted !=True):
-
         mdot_Current = mdotFuncX(x)
         mdot_Prev = mdotFuncX(x-h)
         x1 = x
@@ -487,6 +497,7 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         V1 = V
         P1 =  P
         T1 = T_preburner
+        print("T1",T1,"V1",V1,"P1",P1)
         a1 = soS(T1,R_mix,gas_properties(T1, P1, Y_mix)["gamma"])
         M1 = mNum(V1,a1)
         k1V = h * dVdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf,x1,h)
@@ -496,7 +507,8 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         A2 = geom_Area(x2)
         V2 = V + 1/5 * k1V 
         P2 = P + 1/5 * k1P
-        T2 = newtonRaphson_T(T1, T1, x1, V1, V2, 1/5 * h) 
+        T2 = newtonRaphson_T(T1, T1, x1, V1, V2, 1/5 * h)
+        print("T2",T2,"V2",V2,"P2",P2)
         a2 = soS(T2,R_mix,gas_properties(T2, P2, Y_mix)["gamma"])
         M2 = mNum(V2,a2)
         k2V = h * dVdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf,x2,1/5 * h)
@@ -507,6 +519,8 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         V3 = V + 3/40 * k1V + 9/40 * k2V
         P3 = P + 3/40 * k1P + 9/40 * k2P
         T3 = newtonRaphson_T(T1, T1, x1, V1, V3, 3/10 * h) 
+        print("T3",T3,"V3",V3,"P3",P3)
+
         a3 = soS(T3,R_mix,gas_properties(T3, P3, Y_mix)["gamma"])
         M3 = mNum(V3,a3)
         k3V = h * dVdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf,x3,3/10 * h)
@@ -517,6 +531,8 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         V4 = V + 44/45 * k1V - 56/15 * k2V + 32/9 * k3V
         P4 = P + 44/45 * k1P - 56/15 * k2P + 32/9 * k3P
         T4 = newtonRaphson_T(T1, T1, x1, V1, V4, 4/5 * h) 
+        print("T4",T4,"V4",V4,"P4",P4)
+
         a4 = soS(T4,R_mix,gas_properties(T4, P4, Y_mix)["gamma"])
         M4 = mNum(V4,a4)
         k4V = h * dVdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf,x4,4/5 * h)
@@ -639,8 +655,10 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
 
     mdotReconstructed = [mdot_i] #recontruction array to check if calcs are correct 
     pb_count = 0
-    conv_count = 0
     throat_count = 0
+    conv_count = 0
+    div_count = 0
+
     while (xList[-1] < nozzle_exit ): #actual for loop for solving everything. from start of preburner to throat 
 
         xCurrent = xList[-1]     
@@ -649,21 +667,24 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
         Vbefore = velocities[-1]
         Pbefore = pressure[-1]
         Tbefore = temp [-1]
+        print("V",Vbefore,"P",Pbefore,"T",Tbefore)
         xNext, VCurrent, PCurrent, TCurrent, hNext, location = rk45Step(Vbefore,Pbefore, Cf,hCurrent, xCurrent,Tbefore)
         
         if location == "Preburner":
             pb_count +=1
         elif location == "Throat":
             throat_count +=1 
-        else:
+        elif location == "Conv Nozzle":
             conv_count+=1
+        elif location == "Div Nozzle":
+            div_count +=1 
 
         currentMix_properties = gas_properties(TCurrent, PCurrent,Y_mix)
         currentMix_gamma = currentMix_properties["gamma"]
 
         xList.append(xNext)
         xCurrent = xList[-1]
-
+      
         mdotlocal = mdotFuncX(xCurrent)
         stepList.append(hNext)
 
@@ -690,12 +711,47 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
 
         sCurrent = currentMix_properties["s"]
         entropy.append(sCurrent)
-        if postThroatSolve == False:
-            if MCurrent >= 0.99:
-                break
+
+        print(xCurrent)
+        print(location)
+        print(MCurrent)
+
+        if MCurrent >= 0.99 and postThroatSolve == False:
+            break
+
+        elif geometry_regions(xCurrent) == "Throat" and acceptedScale == True and postThroatSolve == True:
+            throatP = pressure[-1]
+            throatT = temp[-1]
+            throatPstag = pStag[-1]
+            throatTstag = tStag[-1]
+            print("Pstag",throatPstag,"Tstag",throatTstag,"throatP",throatP,"throatT",throatT)
+            MachN = 1.01
+            throatMix_properties = gas_properties(throatT, throatP,Y_mix)
+            throatMix_gamma = throatMix_properties["gamma"]
+            entropy_throat = throatMix_properties["s"]
+
+            P_new, T_New = stagtostatic(throatPstag,throatTstag,MachN,throatMix_gamma)
+            V_new = MachN * soS(T_New,R_mix,throatMix_gamma)
+            print("Vnew",V_new,"Pnew",P_new,"Tnew",T_New,"Mach",MachN)
+            xEndofThroat = throat_loc + 0.01
+            rho_New = mdotlocal/(geom_Area(xEndofThroat) * V_new)
+
+            mdotReconstructed.append(rho_New * V_new * geom_Area(xEndofThroat))
+            mdotList.append(mdotFuncX(xEndofThroat))
+            stepList.append(0.001)
+            xList.append(xEndofThroat)
+            pressure.append(P_new)
+            velocities.append(V_new)
+            temp.append(T_New)
+            density.append(rho_New)
+            machNum.append(MachN)
+            pStag.append(throatPstag)
+            tStag.append(throatTstag)
+            entropy.append(entropy_throat)
+            print("end of if statement")
         else:
-            if MCurrent >= 0.99:
-                print("choked at x = ", xCurrent)
+            continue
+
 
     #if machNum[-1] <0.99:
         #print("flow did NOT CHOKE. final Mach number: ", machNum[-1])
@@ -863,7 +919,6 @@ True_Cf = 0.005
 if __name__ == '__main__':
     high_scale,low_scale,high_res, low_res = scaling_InletPressure(True_Cf) #finding bracket 
     final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
-
     resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
 
     plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["Mach"])
@@ -873,7 +928,7 @@ if __name__ == '__main__':
     plt.show()
 
 
-#MCMC
+#MCMC set up
 #using black box approach 
 
 # wrapper for Op var. basically tells log_likelihood func that i am just putting in a double prec scalar and will
