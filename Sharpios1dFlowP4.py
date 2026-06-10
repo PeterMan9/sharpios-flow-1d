@@ -43,9 +43,6 @@ x_injLocation = 0.15 * preburner_length #m
 def smoothstep(xi):
     return 6*xi**5 - 15*xi**4 + 10*xi**3
 
-def dsmoothstep_dxi(xi):
-    return 30*xi**4 - 60*xi**3 + 30*xi**2
-
 def geometry_regions(x):
     if x <= preburner_length:
         return "Preburner"
@@ -154,7 +151,10 @@ def dPHI(x,dx):
     return dPHI
 
 def dHtdx(x,dx):
-    return (dPHI(x,dx) * hpr_h2 * fst)/dx
+    if x <= preburner_length:
+        return (dPHI(x,dx) * hpr_h2 * fst)/dx
+    else:
+        return 0
 
 def residualT(T_new,T_old,xOld,uOld,uNew,dx):
     T_gasProperties_old = gas_properties(T_old, 101325, Y_mix)
@@ -488,7 +488,6 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         h_max = 1e-4
 
     h = min(h,h_max)
-
     while(accepted !=True):
         mdot_Current = mdotFuncX(x)
         mdot_Prev = mdotFuncX(x-h)
@@ -496,9 +495,12 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         A1 = geom_Area(x1)
         V1 = V
         P1 =  P
-        T1 = T_preburner
-        print("T1",T1,"V1",V1,"P1",P1)
-        a1 = soS(T1,R_mix,gas_properties(T1, P1, Y_mix)["gamma"])
+        try:
+            T1 = T_preburner
+            a1 = soS(T1,R_mix,gas_properties(T1, P1, Y_mix)["gamma"])
+        except:
+            h *= 0.5
+            continue
         M1 = mNum(V1,a1)
         k1V = h * dVdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf,x1,h)
         k1P = h * dPdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf,x1,h)
@@ -507,9 +509,12 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         A2 = geom_Area(x2)
         V2 = V + 1/5 * k1V 
         P2 = P + 1/5 * k1P
-        T2 = newtonRaphson_T(T1, T1, x1, V1, V2, 1/5 * h)
-        print("T2",T2,"V2",V2,"P2",P2)
-        a2 = soS(T2,R_mix,gas_properties(T2, P2, Y_mix)["gamma"])
+        try:
+            T2 = newtonRaphson_T(T1, T1, x1, V1, V2, 1/5 * h)
+            a2 = soS(T2,R_mix,gas_properties(T2, P2, Y_mix)["gamma"])
+        except:
+            h *= 0.5
+            continue
         M2 = mNum(V2,a2)
         k2V = h * dVdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf,x2,1/5 * h)
         k2P = h * dPdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf,x2,1/5 * h)
@@ -518,10 +523,12 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         A3 = geom_Area(x3)
         V3 = V + 3/40 * k1V + 9/40 * k2V
         P3 = P + 3/40 * k1P + 9/40 * k2P
-        T3 = newtonRaphson_T(T1, T1, x1, V1, V3, 3/10 * h) 
-        print("T3",T3,"V3",V3,"P3",P3)
-
-        a3 = soS(T3,R_mix,gas_properties(T3, P3, Y_mix)["gamma"])
+        try:
+            T3 = newtonRaphson_T(T1, T1, x1, V1, V3, 3/10 * h) 
+            a3 = soS(T3,R_mix,gas_properties(T3, P3, Y_mix)["gamma"])
+        except:
+            h *= 0.5
+            continue
         M3 = mNum(V3,a3)
         k3V = h * dVdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf,x3,3/10 * h)
         k3P = h * dPdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf,x3,3/10 * h)
@@ -530,9 +537,11 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         A4 = geom_Area(x4)
         V4 = V + 44/45 * k1V - 56/15 * k2V + 32/9 * k3V
         P4 = P + 44/45 * k1P - 56/15 * k2P + 32/9 * k3P
-        T4 = newtonRaphson_T(T1, T1, x1, V1, V4, 4/5 * h) 
-        print("T4",T4,"V4",V4,"P4",P4)
-
+        try:
+            T4 = newtonRaphson_T(T1, T1, x1, V1, V4, 4/5 * h) 
+        except:
+            h *= 0.5
+            continue
         a4 = soS(T4,R_mix,gas_properties(T4, P4, Y_mix)["gamma"])
         M4 = mNum(V4,a4)
         k4V = h * dVdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf,x4,4/5 * h)
@@ -542,8 +551,14 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         A5 = geom_Area(x5)
         V5 = V + 19372/6561 * k1V - 25360/2187 * k2V + 64448/6561 * k3V - 212/729 * k4V
         P5 = P + 19372/6561 * k1P - 25360/2187 * k2P + 64448/6561 * k3P - 212/729 * k4P
-        T5 = newtonRaphson_T(T1, T1, x1, V1, V5, 8/9 * h)
-        a5 = soS(T5,R_mix,gas_properties(T5, P5, Y_mix)["gamma"])
+        try:
+            T5 = newtonRaphson_T(T1, T1, x1, V1, V5, 8/9 * h)
+            a5 = soS(T5,R_mix,gas_properties(T5, P5, Y_mix)["gamma"])
+
+        except:
+            h *= 0.5
+            continue
+
         M5 = mNum(V5,a5)
         k5V = h * dVdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf,x5,8/9 * h)
         k5P = h * dPdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf,x5,8/9 * h)
@@ -552,8 +567,13 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         A6 = geom_Area(x6)
         V6 = V + 9017/3168 * k1V - 355/33 * k2V + 46732/5247 * k3V + 49/176 * k4V - 5103/18656 * k5V
         P6 = P + 9017/3168 * k1P - 355/33 * k2P + 46732/5247 * k3P + 49/176 * k4P - 5103/18656 * k5P
-        T6 = newtonRaphson_T(T1, T1, x1, V1, V6, 1 * h)
-        a6 = soS(T6,R_mix,gas_properties(T6, P6, Y_mix)["gamma"])
+        try:
+            T6 = newtonRaphson_T(T1, T1, x1, V1, V6, 1 * h)
+            a6 = soS(T6,R_mix,gas_properties(T6, P6, Y_mix)["gamma"])
+        except:
+            h *= 0.5
+            continue
+
         M6 = mNum(V6,a6)
         k6V = h * dVdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf,x6,h)
         k6P = h * dPdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf,x6,h)
@@ -566,8 +586,12 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         A7 = geom_Area(x7)
         V7 = v_5Order
         P7 = p_5Order
-        T7 = newtonRaphson_T(T1, T1, x1, V1, V7, 1 * h)
-        a7 = soS(T7,R_mix,gas_properties(T7, P7, Y_mix)["gamma"])
+        try:
+            T7 = newtonRaphson_T(T1, T1, x1, V1, V7, 1 * h)
+            a7 = soS(T7,R_mix,gas_properties(T7, P7, Y_mix)["gamma"])
+        except:
+            h *= 0.5
+            continue       
         M7 = mNum(V7,a7)
         k7V = h * dVdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf,x7,h)
         k7P = h * dPdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf,x7,h)
@@ -583,24 +607,29 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
 
         if errorV > V * local_tol or errorP > P * local_tol: #comparing error if either error are > than tol it means that step is too big so i am making it smaller 
             accepted = False 
-            sV = 2 if errorV == 0 else 0.9*(tol/errorV)**(1/5)
-            sP = 2 if errorP == 0 else 0.9*(tol/errorP)**(1/5)
+            sV = 2 if errorV == 0 else 0.5*(local_tol/errorV)**(1/5)
+            sP = 2 if errorP == 0 else 0.5*(local_tol/errorP)**(1/5)
             s = min(sV, sP)
-            hUpdated = min(s * h, h_max)
-            h = hUpdated
+            h = min(s * h, h_max)
             continue #this just restarts the loop with the updated h value
             
         else: #if both are smaller than tol then I am accepting the time step and then making it bigger 
             accepted = True
+
             Vnext, Pnext = v_5Order, p_5Order
             xNext = x1 + h
             Tnext = newtonRaphson_T(T1, T1, x1, V1, Vnext, 1 * h)
-            s = 2
 
+            errorRatio = max(
+                errorV/(abs(V) * local_tol), errorP/(abs(P) * local_tol))
+            
+            s = 1.2 if errorRatio == 0 else min(2, 0.9 * errorRatio**(-1/5))
 
-        hUpdated = h
+            h_next = min(s * h, h_max)
+            break
+
     
-    return xNext, Vnext, Pnext, Tnext,hUpdated, location
+    return xNext, Vnext, Pnext, Tnext,h_next, location
 
 
 #Full Solver
@@ -667,7 +696,6 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
         Vbefore = velocities[-1]
         Pbefore = pressure[-1]
         Tbefore = temp [-1]
-        print("V",Vbefore,"P",Pbefore,"T",Tbefore)
         xNext, VCurrent, PCurrent, TCurrent, hNext, location = rk45Step(Vbefore,Pbefore, Cf,hCurrent, xCurrent,Tbefore)
         
         if location == "Preburner":
@@ -684,7 +712,10 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
 
         xList.append(xNext)
         xCurrent = xList[-1]
-      
+
+        areaList.append(geom_Area(xCurrent))
+        dAdxList.append(dAdx(xCurrent))
+
         mdotlocal = mdotFuncX(xCurrent)
         stepList.append(hNext)
 
@@ -712,9 +743,6 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
         sCurrent = currentMix_properties["s"]
         entropy.append(sCurrent)
 
-        print(xCurrent)
-        print(location)
-        print(MCurrent)
 
         if MCurrent >= 0.99 and postThroatSolve == False:
             break
@@ -724,16 +752,14 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
             throatT = temp[-1]
             throatPstag = pStag[-1]
             throatTstag = tStag[-1]
-            print("Pstag",throatPstag,"Tstag",throatTstag,"throatP",throatP,"throatT",throatT)
-            MachN = 1.01
+            MachN = 1.001
             throatMix_properties = gas_properties(throatT, throatP,Y_mix)
             throatMix_gamma = throatMix_properties["gamma"]
             entropy_throat = throatMix_properties["s"]
 
             P_new, T_New = stagtostatic(throatPstag,throatTstag,MachN,throatMix_gamma)
             V_new = MachN * soS(T_New,R_mix,throatMix_gamma)
-            print("Vnew",V_new,"Pnew",P_new,"Tnew",T_New,"Mach",MachN)
-            xEndofThroat = throat_loc + 0.01
+            xEndofThroat = throat_loc + 0.005
             rho_New = mdotlocal/(geom_Area(xEndofThroat) * V_new)
 
             mdotReconstructed.append(rho_New * V_new * geom_Area(xEndofThroat))
@@ -748,7 +774,8 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
             pStag.append(throatPstag)
             tStag.append(throatTstag)
             entropy.append(entropy_throat)
-            print("end of if statement")
+            areaList.append(geom_Area(xEndofThroat))
+            dAdxList.append(dAdx(xEndofThroat))
         else:
             continue
 
@@ -784,7 +811,7 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
         "pressure_stag": pStag_List,
         "temperature_stag": tStag_List,
         "x": x_used_List,
-        "area": Area_List,
+        "Area": Area_List,
         "dAdx": dAdx_List,
         "mdot": mdot_List,
         "mdot_reconstructed": mdotReconsturcted_List,
@@ -809,10 +836,12 @@ def chokedLocationResiduals(scale, Cf):
     
 def eval_scale(args):
     scale, Cf = args
-    res = chokedLocationResiduals(scale, Cf)
-    return scale, res
-
-
+    try:
+        res = chokedLocationResiduals(scale, Cf)
+        return scale, res
+    except Exception as eS:
+        print("Scale Failed ", scale, eS)
+        return scale, np.nan
 def scaling_InletPressure(Cf):
 
     max_scale = 1.0
@@ -844,7 +873,8 @@ def scaling_InletPressure(Cf):
             results = list(executor.map(eval_scale, jobs))
 
             for cur_scale, cur_res in results:
-
+                if not np.isfinite(cur_res):
+                    continue
                 if cur_res * prev_res < 0:
                     return cur_scale, prev_scale, cur_res, prev_res
 
@@ -916,16 +946,34 @@ def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf):
     return best_scale, best_res
 
 True_Cf = 0.005
+'''
 if __name__ == '__main__':
-    high_scale,low_scale,high_res, low_res = scaling_InletPressure(True_Cf) #finding bracket 
-    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
-    resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
 
-    plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["Mach"])
-    plt.xlabel("Position ")
-    plt.ylabel("Mach Number ")
-    plt.grid()
-    plt.show()
+    start_total = time.perf_counter()
+
+    start_sweep = time.perf_counter()
+    high_scale,low_scale,high_res, low_res = scaling_InletPressure(True_Cf) #finding bracket 
+    end_sweep = time.perf_counter()
+
+    start_root = time.perf_counter()
+    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
+    end_root = time.perf_counter()
+    
+    start_solve = time.perf_counter()
+    resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
+    end_solve = time.perf_counter()
+
+    end_total = time.perf_counter()
+
+
+    print(resultsAtCorrectScale["pressure"][-1])
+    print("Sweep time", end_sweep - start_sweep)
+    print("Root Time", end_root - start_root)
+    print("Solve time"  , end_solve - start_solve)
+    print("total Time", end_total - start_total)
+'''
+  
+
 
 
 #MCMC set up
@@ -938,18 +986,19 @@ if __name__ == '__main__':
 dP_True = None
 True_Scale = None
 
-'''
+
 if __name__ == '__main__':
 
     True_Cf = 0.005
-    Cf_grid = np.linspace(True_Cf - 0.002, True_Cf + 0.002, 500)
+    Cf_grid = np.linspace(True_Cf - 0.002, True_Cf, 100)
     logplist = []
     dPlist = []
+    count = 0 
     start_sweep = time.perf_counter()
     high_scale,low_scale,high_res, low_res = scaling_InletPressure(True_Cf) #finding bracket 
     final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
 
-    resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True) #getting exact values at correct scale 
+    resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
 
     trueIPressure = resultsAtCorrectScale["pressure"][0]
     trueFPressure = resultsAtCorrectScale["pressure"][-1]
@@ -958,7 +1007,8 @@ if __name__ == '__main__':
     for Cf_try in Cf_grid:
 
         try:
-            resultsAtCorrectScale = solver(TstagA,Cf_try,final_scale,True) #getting exact values at correct scale 
+            count+=1 
+            resultsAtCorrectScale = solver(TstagA,Cf_try,final_scale,True,True) #getting exact values at correct scale 
 
             Initial_chamerP_Predicted =  resultsAtCorrectScale["pressure"][0]
             Final_chamerP_Predicted = resultsAtCorrectScale["pressure"][-1]
@@ -969,10 +1019,10 @@ if __name__ == '__main__':
             logp = stats.norm.logpdf(dP_true, loc = dP_Predicted, scale = dP_true * 0.01)
             logplist.append(logp)
 
-        except Exception:
-            print(Exception)
+        except Exception as Cf_Fail:
+            print(f"Failed because of: {Cf_Fail}")
 
-
+        #print(count)
 
     logp_array = np.array(logplist)
     Cf_list = Cf_grid[:len(logp_array)]
@@ -991,8 +1041,6 @@ if __name__ == '__main__':
     plt.xlabel("Cf Values")
     plt.ylabel("Log Likelihood")
     plt.grid()
-    plt.show()
-
 
 
 @as_op(itypes=[pt.dscalar],otypes=[pt.dscalar]) 
@@ -1001,7 +1049,7 @@ def log_likelihood(Cf):
     Cf = float(Cf)
     try:
    
-        resultsAtCorrectScale = solver(TstagA,Cf,True_Scale,True) #getting exact values at correct scale
+        resultsAtCorrectScale = solver(TstagA,Cf,True_Scale,True,True) #getting exact values at correct scale
 
         Initial_chamberP_Predicted =  resultsAtCorrectScale["pressure"][0]
         Final_chamberP_Predicted =  resultsAtCorrectScale["pressure"][-1]
@@ -1023,7 +1071,7 @@ if __name__ == '__main__':
     True_Cf = 0.005
     high_scale,low_scale,high_res, low_res = scaling_InletPressure(True_Cf) #finding bracket 
     final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
-    resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True) #getting exact values at correct scale 
+    resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
 
     True_Scale = final_scale
     True_chamberP_Initial = resultsAtCorrectScale["pressure"][0]
@@ -1056,7 +1104,7 @@ if __name__ == '__main__':
         
         log_like = log_likelihood(prior_Cf)
 
-        pm.Potential("Initial Chamber Pressure Likelihood",log_like)
+        pm.Potential("dP tip to tail",log_like)
         
         step = pm.DEMetropolisZ(
             vars = [prior_Cf],
@@ -1154,7 +1202,6 @@ if __name__ == '__main__':
     plt.savefig(f"Cf_running_mean_{run_label}.png", dpi=200)
     plt.show()
 
-'''
 
 
 #Other Stuff
