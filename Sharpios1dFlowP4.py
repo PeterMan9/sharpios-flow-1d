@@ -8,14 +8,13 @@ from scipy import stats
 from scipy.optimize import least_squares
 import time
 import pymc as pm
-import pytensor
 import pytensor.tensor as pt
 from pytensor.compile.ops import as_op
 import arviz as az
-from concurrent.futures import ProcessPoolExecutor
-
+from concurrent.futures import ProcessPoolExecutor,ThreadPoolExecutor
 import warnings
 from datetime import datetime
+import traceback
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 
@@ -834,14 +833,15 @@ def chokedLocationResiduals(scale, Cf):
     residual = throat_loc - x_Choke  #we want this to be zero
     return residual
     
-def eval_scale(args):
-    scale, Cf = args
+def eval_scale(scale,Cf):
+    #scale, Cf = args
     try:
         res = chokedLocationResiduals(scale, Cf)
         return scale, res
     except Exception as eS:
         print("Scale Failed ", scale, eS)
         return scale, np.nan
+    
 def scaling_InletPressure(Cf):
 
     max_scale = 1.0
@@ -857,9 +857,9 @@ def scaling_InletPressure(Cf):
     prev_scale = max_scale
     prev_res = max_res
 
-    batch_size = 5
+    batch_size = 1
 
-    with ProcessPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=20) as executor:
 
         for start_i in range(1, 21, batch_size):
 
@@ -882,6 +882,39 @@ def scaling_InletPressure(Cf):
                 prev_res = cur_res
 
     return None, prev_scale
+
+   
+def scaling_InletPressure_NOTPar(Cf):
+
+    max_scale = 1.0
+    max_res = chokedLocationResiduals(max_scale, Cf)
+
+    if max_res > 0:
+        direction = 1
+    elif max_res < 0:
+        direction = -1
+    else:
+        return max_scale, max_scale
+
+    prev_scale = max_scale
+    prev_res = max_res
+
+    for i in range(1, 21):
+        try:
+            cur_scale = max_scale + direction * (i/10)
+            cur_scale, cur_res = eval_scale(cur_scale,Cf)
+        except Exception as eS:
+            print(f"Failed because of: {eS}")
+            continue
+
+        if not np.isfinite(cur_res):
+            continue
+        if cur_res * prev_res < 0:
+            return cur_scale, prev_scale, cur_res, prev_res
+        
+        prev_scale = cur_scale
+        prev_res = cur_res
+
 
 def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf):
 
@@ -983,14 +1016,11 @@ if __name__ == '__main__':
 # output a double precision scalar 
 # this is just so that i can easily pas my prior into my function 
 
-dP_True = None
-True_Scale = None
-
-
+'''
 if __name__ == '__main__':
 
     True_Cf = 0.005
-    Cf_grid = np.linspace(True_Cf - 0.002, True_Cf, 100)
+    Cf_grid = np.linspace(True_Cf - 0.002, True_Cf+0.002, 10)
     logplist = []
     dPlist = []
     count = 0 
@@ -1008,6 +1038,8 @@ if __name__ == '__main__':
 
         try:
             count+=1 
+            high_scale,low_scale,high_res, low_res = scaling_InletPressure(Cf_try) #finding bracket 
+            final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_try)   # finding exact scale 
             resultsAtCorrectScale = solver(TstagA,Cf_try,final_scale,True,True) #getting exact values at correct scale 
 
             Initial_chamerP_Predicted =  resultsAtCorrectScale["pressure"][0]
@@ -1022,7 +1054,7 @@ if __name__ == '__main__':
         except Exception as Cf_Fail:
             print(f"Failed because of: {Cf_Fail}")
 
-        #print(count)
+        print(count)
 
     logp_array = np.array(logplist)
     Cf_list = Cf_grid[:len(logp_array)]
@@ -1041,35 +1073,40 @@ if __name__ == '__main__':
     plt.xlabel("Cf Values")
     plt.ylabel("Log Likelihood")
     plt.grid()
+    plt.show()
+'''
+
+DP_TRUTH = None
 
 
 @as_op(itypes=[pt.dscalar],otypes=[pt.dscalar]) 
 def log_likelihood(Cf):    
-
+    global DP_TRUTH
     Cf = float(Cf)
     try:
-   
-        resultsAtCorrectScale = solver(TstagA,Cf,True_Scale,True,True) #getting exact values at correct scale
+        high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf) #finding bracket 
+        final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf)   # finding exact scale 
+        resultsAtCorrectScale = solver(TstagA,Cf,final_scale,True,True) #getting exact values at correct scale 
 
         Initial_chamberP_Predicted =  resultsAtCorrectScale["pressure"][0]
         Final_chamberP_Predicted =  resultsAtCorrectScale["pressure"][-1]
         dP_Predicted = Initial_chamberP_Predicted - Final_chamberP_Predicted 
 
-        log_prob = stats.norm.logpdf(dP_True,loc = dP_Predicted,scale = dP_Predicted * 0.05)
+        log_prob = stats.norm.logpdf(DP_TRUTH,loc = dP_Predicted,scale = dP_Predicted * 0.05)
 
         return np.array(log_prob, dtype=np.float64)
     
-    except Exception:
-            print("Likelihood failed", Exception)
+    except Exception as e:
+            print(f"Failed because of: {e}")
+            traceback.print_exc()
             return np.array(-1.0e10, dtype=np.float64)
     
 
 
 #MCMC Model
-
 if __name__ == '__main__':
     True_Cf = 0.005
-    high_scale,low_scale,high_res, low_res = scaling_InletPressure(True_Cf) #finding bracket 
+    high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf) #finding bracket 
     final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
     resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
 
@@ -1077,14 +1114,14 @@ if __name__ == '__main__':
     True_chamberP_Initial = resultsAtCorrectScale["pressure"][0]
     True_chamberP_Final =  resultsAtCorrectScale["pressure"][-1]
     dP_True = True_chamberP_Initial - True_chamberP_Final
-
+    DP_TRUTH = dP_True
     with pm.Model() as model:
         #prior for Cf
         set_sigma = True_Cf * 0.1
         set_mu = 0.0046
 
-        set_draws = 5000
-        set_tune = 1000
+        set_draws = 10000
+        set_tune = 2000
         set_chains = 10
         set_cores = 10
         timestamp = datetime.now().strftime("%d%m%Y_%H%M")
@@ -1098,8 +1135,7 @@ if __name__ == '__main__':
         )
         
         scale = 0.001 #magnitude of param
-        scaling = 2
-
+        scaling = 1
         prior_Cf = pm.TruncatedNormal("Cf", mu=set_mu,  sigma=set_sigma,lower = 0,initval=set_mu,default_transform=None)
         
         log_like = log_likelihood(prior_Cf)
@@ -1201,6 +1237,7 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.savefig(f"Cf_running_mean_{run_label}.png", dpi=200)
     plt.show()
+
 
 
 

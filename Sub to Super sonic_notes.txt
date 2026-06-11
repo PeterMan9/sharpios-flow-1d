@@ -1,0 +1,12 @@
+Sub to Super sonic 
+
+basically have a true false set up sort of as a switch 
+if false just stop at throat 
+if true 
+solve past throat - just to save time or what ever 
+
+so once i have scaled my pressure, i am choking at the throat M = 0.999 
+	i freeze gamma, stag temp, stag pressure and isentropically solve for when M = 1.0001
+	so i just use isentropic relations and i have a given stag values and solve for the static values 
+	then update all of my arrays and have the code continue from there 
+	
