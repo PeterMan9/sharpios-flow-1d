@@ -682,6 +682,7 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
     entropy = [sInitial]
 
     mdotReconstructed = [mdot_i] #recontruction array to check if calcs are correct 
+    throatP = 0
     pb_count = 0
     throat_count = 0
     conv_count = 0
@@ -822,7 +823,8 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
         "Initial Tstag" : tStag_List[0],
         "Preburner Count": pb_count,
         "Conv Count": conv_count,
-        "throat Count": throat_count
+        "throat Count": throat_count,
+        "Throat Pressure": throatP
     }
 
 #Sweeping
@@ -840,49 +842,8 @@ def eval_scale(scale,Cf):
         return scale, res
     except Exception as eS:
         print("Scale Failed ", scale, eS)
+        traceback.print_exc()
         return scale, np.nan
-    
-def scaling_InletPressure(Cf):
-
-    max_scale = 1.0
-    max_res = chokedLocationResiduals(max_scale, Cf)
-
-    if max_res > 0:
-        direction = 1
-    elif max_res < 0:
-        direction = -1
-    else:
-        return max_scale, max_scale
-
-    prev_scale = max_scale
-    prev_res = max_res
-
-    batch_size = 1
-
-    with ThreadPoolExecutor(max_workers=20) as executor:
-
-        for start_i in range(1, 21, batch_size):
-
-            scale_tests = [
-                max_scale + direction * (i / 10)
-                for i in range(start_i, min(start_i + batch_size, 21))
-            ]
-
-            jobs = [(scale, Cf) for scale in scale_tests]
-
-            results = list(executor.map(eval_scale, jobs))
-
-            for cur_scale, cur_res in results:
-                if not np.isfinite(cur_res):
-                    continue
-                if cur_res * prev_res < 0:
-                    return cur_scale, prev_scale, cur_res, prev_res
-
-                prev_scale = cur_scale
-                prev_res = cur_res
-
-    return None, prev_scale
-
    
 def scaling_InletPressure_NOTPar(Cf):
 
@@ -905,6 +866,8 @@ def scaling_InletPressure_NOTPar(Cf):
             cur_scale, cur_res = eval_scale(cur_scale,Cf)
         except Exception as eS:
             print(f"Failed because of: {eS}")
+            traceback.print_exc()
+
             continue
 
         if not np.isfinite(cur_res):
@@ -1004,11 +967,10 @@ if __name__ == '__main__':
     print("Root Time", end_root - start_root)
     print("Solve time"  , end_solve - start_solve)
     print("total Time", end_total - start_total)
-'''
   
+'''
 
-
-
+'''
 #MCMC set up
 #using black box approach 
 
@@ -1016,39 +978,39 @@ if __name__ == '__main__':
 # output a double precision scalar 
 # this is just so that i can easily pas my prior into my function 
 
-'''
+
 if __name__ == '__main__':
 
     True_Cf = 0.005
-    Cf_grid = np.linspace(True_Cf - 0.002, True_Cf+0.002, 10)
+    Cf_grid = np.linspace(True_Cf - 0.002, True_Cf+0.002, 50)
     logplist = []
     dPlist = []
     count = 0 
     start_sweep = time.perf_counter()
-    high_scale,low_scale,high_res, low_res = scaling_InletPressure(True_Cf) #finding bracket 
+    high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf) #finding bracket 
     final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
 
     resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
 
-    trueIPressure = resultsAtCorrectScale["pressure"][0]
+    trueThroatPressure = resultsAtCorrectScale["Throat Pressure"]
     trueFPressure = resultsAtCorrectScale["pressure"][-1]
-    dP_true = trueIPressure - trueFPressure 
+    dP_true = trueThroatPressure - trueFPressure 
 
     for Cf_try in Cf_grid:
 
         try:
             count+=1 
-            high_scale,low_scale,high_res, low_res = scaling_InletPressure(Cf_try) #finding bracket 
+            high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf_try) #finding bracket 
             final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_try)   # finding exact scale 
             resultsAtCorrectScale = solver(TstagA,Cf_try,final_scale,True,True) #getting exact values at correct scale 
 
-            Initial_chamerP_Predicted =  resultsAtCorrectScale["pressure"][0]
-            Final_chamerP_Predicted = resultsAtCorrectScale["pressure"][-1]
+            ThroatPressure_Predicted = resultsAtCorrectScale["Throat Pressure"]
+            FinalPressure_Predicted = resultsAtCorrectScale["pressure"][-1]
 
-            dP_Predicted = Initial_chamerP_Predicted - Final_chamerP_Predicted
+            dP_Predicted = ThroatPressure_Predicted - FinalPressure_Predicted
             dPlist.append(dP_Predicted)
 
-            logp = stats.norm.logpdf(dP_true, loc = dP_Predicted, scale = dP_true * 0.01)
+            logp = stats.norm.logpdf(dP_true, loc = dP_Predicted, scale = dP_true * 0.05)
             logplist.append(logp)
 
         except Exception as Cf_Fail:
@@ -1074,25 +1036,23 @@ if __name__ == '__main__':
     plt.ylabel("Log Likelihood")
     plt.grid()
     plt.show()
-'''
 
-DP_TRUTH = None
+'''
 
 
 @as_op(itypes=[pt.dscalar],otypes=[pt.dscalar]) 
 def log_likelihood(Cf):    
-    global DP_TRUTH
     Cf = float(Cf)
     try:
         high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf) #finding bracket 
         final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf)   # finding exact scale 
         resultsAtCorrectScale = solver(TstagA,Cf,final_scale,True,True) #getting exact values at correct scale 
 
-        Initial_chamberP_Predicted =  resultsAtCorrectScale["pressure"][0]
-        Final_chamberP_Predicted =  resultsAtCorrectScale["pressure"][-1]
-        dP_Predicted = Initial_chamberP_Predicted - Final_chamberP_Predicted 
+        ThroatPressure_Predicted = resultsAtCorrectScale["Throat Pressure"]
+        FinalPressure_Predicted =  resultsAtCorrectScale["pressure"][-1]
+        dP_Predicted = ThroatPressure_Predicted - FinalPressure_Predicted 
 
-        log_prob = stats.norm.logpdf(DP_TRUTH,loc = dP_Predicted,scale = dP_Predicted * 0.05)
+        log_prob = stats.norm.logpdf(dP_True,loc = dP_Predicted,scale = dP_Predicted * 0.05)
 
         return np.array(log_prob, dtype=np.float64)
     
@@ -1101,29 +1061,28 @@ def log_likelihood(Cf):
             traceback.print_exc()
             return np.array(-1.0e10, dtype=np.float64)
     
+True_Cf = 0.005
+high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf) #finding bracket 
+final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
+resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
 
+True_Scale = final_scale
+True_ThroatPressure = resultsAtCorrectScale["Throat Pressure"]
+True_FPressure =  resultsAtCorrectScale["pressure"][-1]
+dP_True = True_ThroatPressure - True_FPressure
 
 #MCMC Model
 if __name__ == '__main__':
-    True_Cf = 0.005
-    high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf) #finding bracket 
-    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
-    resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
 
-    True_Scale = final_scale
-    True_chamberP_Initial = resultsAtCorrectScale["pressure"][0]
-    True_chamberP_Final =  resultsAtCorrectScale["pressure"][-1]
-    dP_True = True_chamberP_Initial - True_chamberP_Final
-    DP_TRUTH = dP_True
     with pm.Model() as model:
         #prior for Cf
-        set_sigma = True_Cf * 0.1
-        set_mu = 0.0046
+        set_sigma = True_Cf * 0.05
+        set_mu = 0.0049
 
-        set_draws = 10000
-        set_tune = 2000
-        set_chains = 10
-        set_cores = 10
+        set_draws = 500
+        set_tune = 250
+        set_chains = 4
+        set_cores = 4
         timestamp = datetime.now().strftime("%d%m%Y_%H%M")
 
         run_label = (
@@ -1135,7 +1094,7 @@ if __name__ == '__main__':
         )
         
         scale = 0.001 #magnitude of param
-        scaling = 1
+        scaling = 0.8
         prior_Cf = pm.TruncatedNormal("Cf", mu=set_mu,  sigma=set_sigma,lower = 0,initval=set_mu,default_transform=None)
         
         log_like = log_likelihood(prior_Cf)
