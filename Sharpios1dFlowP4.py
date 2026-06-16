@@ -17,10 +17,6 @@ from datetime import datetime
 import traceback
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-
-f_darcy = 0.02
-Cf = f_darcy/4
-
 Vinj = None 
 injMdot = 0
 
@@ -91,7 +87,44 @@ def dAdx(x, tol = 1e-3):
         return dA/(xCurrent - xPrev)
     else:
         return 0.0
+
+def pressureTap(x_old, p_old, x_new, p_new, PT_locations):
+    location = None
+    p_tap = None
+
+    for location in PT_locations[:]:
+        locationCrossed = (x_old <= location <= x_new) or (x_new <= location <= x_old)
+
+        if locationCrossed:
+            if x_new != x_old:
+                frac = (location - x_old)/(x_new - x_old)
+                p_tap = p_old + frac  * (p_new - p_old)
+
+                PT_locations.remove(location)
+                return p_tap,x_new 
     
+    return None,None
+    
+
+'''
+
+def pressureTap(x,pressure, PT_locations):
+    if geometry_regions(x) == "Preburner":
+        tol_local = 1e-3
+    elif geometry_regions(x) == "Throat":
+        tol_local = 1e-5
+    elif geometry_regions(x) == "Conv Nozzle" or geometry_regions(x) == "Div Nozzle":
+        tol_local = 1e-3
+    else:
+        tol_local = 1e-3
+
+    for i, location in enumerate(PT_locations):
+        if abs(x - location) <= tol_local:
+            PT_locations.pop(i)
+            return pressure, x
+    return None
+''' 
+
 def mNum(v,a): #mach number 
     M = v/a
     return M
@@ -538,10 +571,10 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         P4 = P + 44/45 * k1P - 56/15 * k2P + 32/9 * k3P
         try:
             T4 = newtonRaphson_T(T1, T1, x1, V1, V4, 4/5 * h) 
+            a4 = soS(T4,R_mix,gas_properties(T4, P4, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue
-        a4 = soS(T4,R_mix,gas_properties(T4, P4, Y_mix)["gamma"])
         M4 = mNum(V4,a4)
         k4V = h * dVdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf,x4,4/5 * h)
         k4P = h * dPdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf,x4,4/5 * h)
@@ -635,7 +668,7 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
 def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
     global mdot,Vinj #making them global so that i can use them in rk45 and ode functions
     Vinj = 0
-   
+
     Preburner_T = Preburner_TStag #k
 
     Preburner_predictedPStag = pstag_predicted(mdot_i, throat_Area, Preburner_TStag, gas_properties(Preburner_TStag, 101325, Y_mix)["gamma"])
@@ -673,11 +706,15 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
     areaList = [geom_Area(0)]
     dAdxList = [0.0]
     areaRatio = [1.0]
-
     xList = [0.0] #this list starts at the preburner 
     stepList = [1e-1]
     mdotList = [mdot_i]
     
+    pt_location = []
+    pt_pressures = []
+    PT_locations = [0.1,0.2,0.3,0.4,0.495,0.5,0.505,0.51,0.6,0.64]
+
+
     sInitial = gas_properties(Preburner_T, Preburner_P,Y_mix)["s"]
     entropy = [sInitial]
 
@@ -687,17 +724,17 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
     throat_count = 0
     conv_count = 0
     div_count = 0
-
     while (xList[-1] < nozzle_exit ): #actual for loop for solving everything. from start of preburner to throat 
 
-        xCurrent = xList[-1]     
-        hCurrent = stepList[-1] #from step 0 to step 1 and then step 1 to step 2 etc 
+        xPrev = xList[-1]     
+        hPrev = stepList[-1] #from step 0 to step 1 and then step 1 to step 2 etc 
         
         Vbefore = velocities[-1]
         Pbefore = pressure[-1]
         Tbefore = temp [-1]
-        xNext, VCurrent, PCurrent, TCurrent, hNext, location = rk45Step(Vbefore,Pbefore, Cf,hCurrent, xCurrent,Tbefore)
-        
+        xNext, VCurrent, PCurrent, TCurrent, hNext, location = rk45Step(Vbefore,Pbefore, Cf,hPrev, xPrev,Tbefore)
+
+
         if location == "Preburner":
             pb_count +=1
         elif location == "Throat":
@@ -712,6 +749,7 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
 
         xList.append(xNext)
         xCurrent = xList[-1]
+
 
         areaList.append(geom_Area(xCurrent))
         dAdxList.append(dAdx(xCurrent))
@@ -742,7 +780,12 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
 
         sCurrent = currentMix_properties["s"]
         entropy.append(sCurrent)
+        if postThroatSolve == True:
+            pt_P, pt_x= pressureTap(xList[-2],pressure[-2],xCurrent, PCurrent,PT_locations)
 
+            if pt_P is not None:
+                pt_location.append(pt_x)
+                pt_pressures.append(pt_P)
 
         if MCurrent >= 0.99 and postThroatSolve == False:
             break
@@ -776,6 +819,14 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
             entropy.append(entropy_throat)
             areaList.append(geom_Area(xEndofThroat))
             dAdxList.append(dAdx(xEndofThroat))
+            pt_P, pt_x = pressureTap(xList[-2],pressure[-2],xEndofThroat, P_new,PT_locations)
+            if pt_P is not None:
+
+                pt_location.append(pt_x)
+                pt_pressures.append(pt_P)
+
+
+
         else:
             continue
 
@@ -796,7 +847,8 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
     x_used_List = np.array(xList[:len(V_List)])
     Area_List = np.array(areaList)
     dAdx_List = np.array(dAdxList)
-
+    pt_PressureList = np.array(pt_pressures)
+    pt_locationList = np.array(pt_location)
 
     mdotReconsturcted_List = np.array(mdotReconstructed)
     mdot_List = mdotList
@@ -824,7 +876,10 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
         "Preburner Count": pb_count,
         "Conv Count": conv_count,
         "throat Count": throat_count,
-        "Throat Pressure": throatP
+        "Throat Pressure": throatP,
+        "PT_P": pt_PressureList,
+        "PT_X": pt_locationList
+
     }
 
 #Sweeping
@@ -941,36 +996,55 @@ def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf):
 
     return best_scale, best_res
 
+
+'''
 True_Cf = 0.005
+start_total = time.perf_counter()
+
+start_sweep = time.perf_counter()
+high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf) #finding bracket 
+end_sweep = time.perf_counter()
+
+start_root = time.perf_counter()
+final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
+end_root = time.perf_counter()
+
+start_solve = time.perf_counter()
+results_TrueCf = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
+end_solve = time.perf_counter()
+
+end_total = time.perf_counter()
+
+
+print("Sweep time", end_sweep - start_sweep)
+print("Root Time", end_root - start_root)
+print("Solve time"  , end_solve - start_solve)
+print("total Time", end_total - start_total)
+
+
+Test_Cf = 0.004
+high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Test_Cf) #finding bracket 
+
+final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Test_Cf)   # finding exact scale 
+
+results_TestCf = solver(TstagA,Test_Cf,final_scale,True,True) #getting exact values at correct scale 
+
+#Error_Cf = results_TestCf["PT_P"] - results_TrueCf["PT_P"]
+
+#norm_errorCf = np.linalg.norm(Error_Cf, ord = 1)
+
+#plt.plot(results_TrueCf["x"], results_TrueCf["pressure"] * 1e-6, '-', label = "True Cf ")
+#plt.plot(results_TrueCf["PT_X"], results_TrueCf["PT_P"] * 1e-6, 'o', label = "True Cf")
+
+plt.plot(results_TestCf["PT_X"], results_TestCf["PT_P"] * 1e-6, 'o', label = "Test Cf")
+plt.xlabel("x")
+plt.ylabel("Pressure MPa")
+plt.grid()
+plt.legend()
+plt.show()
 '''
-if __name__ == '__main__':
-
-    start_total = time.perf_counter()
-
-    start_sweep = time.perf_counter()
-    high_scale,low_scale,high_res, low_res = scaling_InletPressure(True_Cf) #finding bracket 
-    end_sweep = time.perf_counter()
-
-    start_root = time.perf_counter()
-    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
-    end_root = time.perf_counter()
-    
-    start_solve = time.perf_counter()
-    resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
-    end_solve = time.perf_counter()
-
-    end_total = time.perf_counter()
 
 
-    print(resultsAtCorrectScale["pressure"][-1])
-    print("Sweep time", end_sweep - start_sweep)
-    print("Root Time", end_root - start_root)
-    print("Solve time"  , end_solve - start_solve)
-    print("total Time", end_total - start_total)
-  
-'''
-
-'''
 #MCMC set up
 #using black box approach 
 
@@ -980,23 +1054,24 @@ if __name__ == '__main__':
 
 
 if __name__ == '__main__':
-
     True_Cf = 0.005
-    Cf_grid = np.linspace(True_Cf - 0.002, True_Cf+0.002, 50)
-    logplist = []
-    dPlist = []
-    count = 0 
-    start_sweep = time.perf_counter()
+
     high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf) #finding bracket 
     final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
-
     resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
 
-    trueThroatPressure = resultsAtCorrectScale["Throat Pressure"]
-    trueFPressure = resultsAtCorrectScale["pressure"][-1]
-    dP_true = trueThroatPressure - trueFPressure 
+    true_PTPressure = resultsAtCorrectScale["PT_P"]
+    true_Error = resultsAtCorrectScale["PT_P"] - resultsAtCorrectScale["PT_P"]
+    true_errorNorm = np.linalg.norm(true_Error,ord = 1)
+
+    Cf_grid = np.linspace(True_Cf - 0.002, True_Cf+0.002, 50)
+    logplist = []
+    errNorm = []
+    count = 0 
+
 
     for Cf_try in Cf_grid:
+
 
         try:
             count+=1 
@@ -1004,29 +1079,32 @@ if __name__ == '__main__':
             final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_try)   # finding exact scale 
             resultsAtCorrectScale = solver(TstagA,Cf_try,final_scale,True,True) #getting exact values at correct scale 
 
-            ThroatPressure_Predicted = resultsAtCorrectScale["Throat Pressure"]
-            FinalPressure_Predicted = resultsAtCorrectScale["pressure"][-1]
+            Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
 
-            dP_Predicted = ThroatPressure_Predicted - FinalPressure_Predicted
-            dPlist.append(dP_Predicted)
+            Error_predicted = Predicted_PTPressure - true_PTPressure
 
-            logp = stats.norm.logpdf(dP_true, loc = dP_Predicted, scale = dP_true * 0.05)
+            error_norm = np.linalg.norm(Error_predicted, ord=1)
+
+            logp = stats.norm.logpdf(error_norm, loc = true_errorNorm, scale = 1e4)
+
+            errNorm.append(error_norm)
             logplist.append(logp)
-
+            print(count)
         except Exception as Cf_Fail:
             print(f"Failed because of: {Cf_Fail}")
 
-        print(count)
 
     logp_array = np.array(logplist)
     Cf_list = Cf_grid[:len(logp_array)]
-    dP_array = np.array(dPlist)
-
-    
+    errNorm_array = np.array(errNorm)
+    errNorm_sigma = 1e4
+    print(errNorm_sigma)
     plt.figure()
-    plt.plot(Cf_list,dP_array * 1e-6)
+    plt.plot(Cf_list,errNorm_array, label = "err norms")
+    plt.axhline(y=true_errorNorm, color='red', label = "true error norm ")
     plt.xlabel("Cf Values")
-    plt.ylabel("dP MPa")
+    plt.ylabel("Nrom Error")
+    plt.legend()
     plt.grid()
 
 
@@ -1037,22 +1115,20 @@ if __name__ == '__main__':
     plt.grid()
     plt.show()
 
-'''
 
-
-@as_op(itypes=[pt.dscalar],otypes=[pt.dscalar]) 
-def log_likelihood(Cf):    
+@as_op(itypes=[pt.dscalar,pt.dvector,pt.dscalar,pt.dscalar],otypes=[pt.dscalar]) 
+def log_likelihood(Cf,true_PTPressure,true_errorNorm,errNorm_sigma):    
     Cf = float(Cf)
+    errNorm_sigma = float(errNorm_sigma)
     try:
         high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf) #finding bracket 
         final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf)   # finding exact scale 
         resultsAtCorrectScale = solver(TstagA,Cf,final_scale,True,True) #getting exact values at correct scale 
+        Predicted_PTPRessure = resultsAtCorrectScale["PT_P"]
 
-        ThroatPressure_Predicted = resultsAtCorrectScale["Throat Pressure"]
-        FinalPressure_Predicted =  resultsAtCorrectScale["pressure"][-1]
-        dP_Predicted = ThroatPressure_Predicted - FinalPressure_Predicted 
-
-        log_prob = stats.norm.logpdf(dP_True,loc = dP_Predicted,scale = dP_Predicted * 0.05)
+        Error_predicted = Predicted_PTPRessure - true_PTPressure
+        error_norm = np.linalg.norm(Error_predicted, ord=1)
+        log_prob = stats.norm.logpdf(error_norm,loc = true_errorNorm,scale = errNorm_sigma)
 
         return np.array(log_prob, dtype=np.float64)
     
@@ -1061,18 +1137,10 @@ def log_likelihood(Cf):
             traceback.print_exc()
             return np.array(-1.0e10, dtype=np.float64)
     
-True_Cf = 0.005
-high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf) #finding bracket 
-final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
-resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
-
-True_Scale = final_scale
-True_ThroatPressure = resultsAtCorrectScale["Throat Pressure"]
-True_FPressure =  resultsAtCorrectScale["pressure"][-1]
-dP_True = True_ThroatPressure - True_FPressure
 
 #MCMC Model
 if __name__ == '__main__':
+
 
     with pm.Model() as model:
         #prior for Cf
@@ -1080,10 +1148,10 @@ if __name__ == '__main__':
         set_mu = 0.0049
 
         set_draws = 500
-        set_tune = 250
+        set_tune = 500
         set_chains = 4
         set_cores = 4
-        timestamp = datetime.now().strftime("%d%m%Y_%H%M")
+        timestamp = datetime.now().strftime("%H_%d_%m_%Y")
 
         run_label = (
             f"{timestamp}"
@@ -1094,12 +1162,15 @@ if __name__ == '__main__':
         )
         
         scale = 0.001 #magnitude of param
-        scaling = 0.8
+        scaling = 0.1
         prior_Cf = pm.TruncatedNormal("Cf", mu=set_mu,  sigma=set_sigma,lower = 0,initval=set_mu,default_transform=None)
         
-        log_like = log_likelihood(prior_Cf)
+        log_like = log_likelihood(prior_Cf,
+                                        pt.as_tensor_variable(true_PTPressure, dtype="float64"),         
+                                        pt.as_tensor_variable(true_errorNorm, dtype="float64"),        
+                                        pt.as_tensor_variable(errNorm_sigma, dtype="float64")  )
 
-        pm.Potential("dP tip to tail",log_like)
+        pm.Potential("L1 Error Norm",log_like)
         
         step = pm.DEMetropolisZ(
             vars = [prior_Cf],
@@ -1146,14 +1217,18 @@ if __name__ == '__main__':
         f.write("Settings:\n")
         f.write(f"Truce CF = {True_Cf}\n")
         f.write(f"Prior Mean = {set_mu}\n")
+        f.write(f"Prior Sigma = {set_sigma}\n")
+        f.write(f"Likelihood Mean = {true_errorNorm}\n")
+        f.write(f"Likelihood Sigma = {errNorm_sigma}\n")
         f.write(f"Draws = {set_draws}\n")
         f.write(f"Tune = {set_tune}\n")
         f.write(f"Chains = {set_chains}\n")
         f.write(f"Cores = {set_cores}\n")
         f.write(f"Scale = {scale}\n")
         f.write(f"Scaling = {scaling}\n")
+        f.write(f"Acceptance Rate: {acceptance_rate}\n")
 
-        f.write("ARVIZ SUmmary\n")
+        f.write("ARVIZ Summary\n")
         f.write("---------------------\n")
         f.write(summary.to_string())
 
@@ -1166,21 +1241,21 @@ if __name__ == '__main__':
     az.plot_trace(trace, var_names=["Cf"])
     plt.title("Trace Plot")
     plt.tight_layout()
-    plt.savefig(f"Cf_trace_{run_label}.png", dpi=200)
+    plt.savefig(f"{run_label}_Cf_trace.png", dpi=200)
     plt.show()
 
     # 2. posterior plot with true value
     az.plot_dist(trace, var_names=["Cf"])
     plt.title("Posterior Plot")
     plt.tight_layout()
-    plt.savefig(f"Cf_posterior_{run_label}.png", dpi=200)
+    plt.savefig(f"{run_label}_Cf_posterior.png", dpi=200)
     plt.show()
 
     # 3. autocorrelation plot
     az.plot_autocorr(trace, var_names=["Cf"])
     plt.title("AutoCorrelationPlot")
     plt.tight_layout()
-    plt.savefig(f"Cf_autocorr_{run_label}.png", dpi=200)
+    plt.savefig(f"{run_label}_Cf_autocorr_.png", dpi=200)
     plt.show()
 
     # 4. running mean plot
@@ -1194,7 +1269,7 @@ if __name__ == '__main__':
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(f"Cf_running_mean_{run_label}.png", dpi=200)
+    plt.savefig(f"{run_label}_Cf_running_mean.png", dpi=200)
     plt.show()
 
 
