@@ -1156,6 +1156,7 @@ def run_MCMC_case(caseConfig):
                 f"chains{set_chains}_"
                 f"cores{set_cores}_"
             )
+            nameofCase = caseConfig["Case_Name"]
 
             results_root = Path("MCMC Results")
             results_root.mkdir(exist_ok = True)
@@ -1163,7 +1164,7 @@ def run_MCMC_case(caseConfig):
             case_folder = results_root / run_label
             case_folder.mkdir(exist_ok = True)
 
-            with open(case_folder/"config.txt", "w") as f:
+            with open(case_folder/f"{nameofCase}_config.txt", "w") as f:
                 for key,value in caseConfig.items():
                     f.write(f"{key}: {value}\n")
 
@@ -1213,25 +1214,18 @@ def run_MCMC_case(caseConfig):
     summary = az.summary(trace, var_names=["Cf"])
     print(summary)
 
-
     cf_samples = trace.posterior["Cf"].values.flatten()
-
-
-    np.save(case_folder / "Cf_sample.npy",cf_samples)
     
-    
-    print("True_Cf:", True_Cf)
+    print("True_Cf:", set_True_Cf)
     print("Posterior mean:", np.mean(cf_samples))
     print("Posterior median:", np.median(cf_samples))
     print("5%-95%:", np.quantile(cf_samples, [0.05, 0.95]))
 
-
-    
-    with open(case_folder/ "MCMC_Report.txt", "w") as f:
+    with open(case_folder/ f"{nameofCase}_MCMC_Report.txt", "w") as f:
 
         f.write("Settings:\n")
         f.write(f"Case Name  = {caseConfig['Case_Name']}\n")
-        f.write(f"True CF = {True_Cf}\n")
+        f.write(f"True CF = {set_True_Cf}\n")
         f.write(f"Prior Mean = {set_Prior_mu}\n")
         f.write(f"Prior Sigma = {set_Prior_sigma}\n")
         f.write(f"Likelihood Mean = {true_errorNorm}\n")
@@ -1253,45 +1247,46 @@ def run_MCMC_case(caseConfig):
         f.write(f"Posterior Median :{np.median(cf_samples)}\n")
         f.write(f"Posterior STD :{np.std(cf_samples)}\n")
 
-
     # 1. trace plot
     az.plot_trace(trace, var_names=["Cf"])
     plt.title("Trace Plot")
     plt.tight_layout()
-    TracePlot_path = case_folder / "Trace.png"
+    TracePlot_path = case_folder / f"{nameofCase}_Trace.png"
     plt.savefig(TracePlot_path,dpi=200)
+    plt.close()
 
     # 2. posterior plot with true value
     az.plot_dist(trace, var_names=["Cf"])
     plt.title("Posterior Plot")
     plt.tight_layout()
-    PosteriorPlot_path = case_folder / "Posterior.png"
+    PosteriorPlot_path = case_folder / f"{nameofCase}_Posterior.png"
     plt.savefig(PosteriorPlot_path,dpi=200)
+    plt.close()
 
     # 3. autocorrelation plot
     az.plot_autocorr(trace, var_names=["Cf"])
     plt.title("AutoCorrelationPlot")
     plt.tight_layout()
-    AutocorrPlot_path = case_folder / "Autocorr.png"
+    AutocorrPlot_path = case_folder / f"{nameofCase}_Autocorr.png"
     plt.savefig(AutocorrPlot_path,dpi=200)
+    plt.close()
 
     # 4. running mean plot
     running_mean = np.cumsum(cf_samples) / np.arange(1, len(cf_samples) + 1)
 
     plt.figure()
     plt.plot(running_mean)
-    plt.axhline(True_Cf, linestyle="--", label="True Cf")
+    plt.axhline(set_True_Cf, linestyle="--", label="True Cf")
     plt.xlabel("Sample")
     plt.ylabel("Running mean of Cf")
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    RunningMeanPlot_path = case_folder / "Running_mean.png"
+    RunningMeanPlot_path = case_folder / f"{nameofCase}_Running_mean.png"
     plt.savefig(RunningMeanPlot_path,dpi=200)
+    plt.close()
 
-    az.from_netcdf(trace,case_folder/"trace.nc")
-
-
+#cases and running model 
 if __name__ == "__main__":
 
     case_name = sys.argv[1]
@@ -1308,7 +1303,7 @@ if __name__ == "__main__":
             "Chains" : 4 ,
             "Cores" : 4,
             "Scale" : 0.001,
-            "Scaling" : 1e-3
+            "Scaling" : 0.1
     },
 
         "Case_2": {
@@ -1322,7 +1317,7 @@ if __name__ == "__main__":
             "Chains" : 4 ,
             "Cores" : 4,
             "Scale" : 0.001,
-            "Scaling" : 5e-3
+            "Scaling" : 1
         },
 
         "Case_3": {
@@ -1336,7 +1331,7 @@ if __name__ == "__main__":
                 "Chains" : 4 ,
                 "Cores" : 4,
                 "Scale" : 0.001,
-                "Scaling" : 1e-3
+                "Scaling" : 0.1
             },
     
         "Case_4": {
@@ -1350,7 +1345,7 @@ if __name__ == "__main__":
             "Chains" : 4 ,
             "Cores" : 4,
             "Scale" : 0.001,
-            "Scaling" : 5e-3
+            "Scaling" : 1
         }
     }
   

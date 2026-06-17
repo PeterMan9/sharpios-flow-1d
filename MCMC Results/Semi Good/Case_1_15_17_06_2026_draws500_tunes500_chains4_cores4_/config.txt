@@ -1,4 +1,4 @@
-Case_Name: Case_4
+Case_Name: Case_1
 True_Cf: 0.005
 Prior_mu: 0.00475
 Prior_sigma: 0.00025
@@ -8,4 +8,4 @@ Tune: 500
 Chains: 4
 Cores: 4
 Scale: 0.001
-Scaling: 0.0001
+Scaling: 0.001
