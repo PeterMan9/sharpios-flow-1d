@@ -1,19 +1,21 @@
 import numpy as np
-import math
-
 import matplotlib.pyplot as plt
-from scipy.optimize import fsolve
+
 import cantera as ct
+
+from scipy.optimize import fsolve
 from scipy import stats
 from scipy.optimize import least_squares
-import time
+
 import pymc as pm
 import pytensor.tensor as pt
 from pytensor.compile.ops import as_op
 import arviz as az
-from concurrent.futures import ProcessPoolExecutor,ThreadPoolExecutor
+
+import sys
 import warnings
 from datetime import datetime
+from pathlib import Path
 import traceback
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -93,7 +95,7 @@ def pressureTap(x_old, p_old, x_new, p_new, PT_locations):
     p_tap = None
 
     for location in PT_locations[:]:
-        locationCrossed = (x_old <= location <= x_new) or (x_new <= location <= x_old)
+        locationCrossed = (x_old <= location <= x_new)
 
         if locationCrossed:
             if x_new != x_old:
@@ -105,25 +107,6 @@ def pressureTap(x_old, p_old, x_new, p_new, PT_locations):
     
     return None,None
     
-
-'''
-
-def pressureTap(x,pressure, PT_locations):
-    if geometry_regions(x) == "Preburner":
-        tol_local = 1e-3
-    elif geometry_regions(x) == "Throat":
-        tol_local = 1e-5
-    elif geometry_regions(x) == "Conv Nozzle" or geometry_regions(x) == "Div Nozzle":
-        tol_local = 1e-3
-    else:
-        tol_local = 1e-3
-
-    for i, location in enumerate(PT_locations):
-        if abs(x - location) <= tol_local:
-            PT_locations.pop(i)
-            return pressure, x
-    return None
-''' 
 
 def mNum(v,a): #mach number 
     M = v/a
@@ -1053,68 +1036,61 @@ plt.show()
 # this is just so that i can easily pas my prior into my function 
 
 
-if __name__ == '__main__':
-    True_Cf = 0.005
 
-    high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf) #finding bracket 
-    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
-    resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
-
-    true_PTPressure = resultsAtCorrectScale["PT_P"]
-    true_Error = resultsAtCorrectScale["PT_P"] - resultsAtCorrectScale["PT_P"]
-    true_errorNorm = np.linalg.norm(true_Error,ord = 1)
-
-    Cf_grid = np.linspace(True_Cf - 0.002, True_Cf+0.002, 50)
-    logplist = []
-    errNorm = []
-    count = 0 
+'''
+Cf_grid = np.linspace(True_Cf - 0.002, True_Cf+0.002, 50)
+logplist = []
+errNorm = []
+count = 0 
 
 
-    for Cf_try in Cf_grid:
+for Cf_try in Cf_grid:
 
 
-        try:
-            count+=1 
-            high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf_try) #finding bracket 
-            final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_try)   # finding exact scale 
-            resultsAtCorrectScale = solver(TstagA,Cf_try,final_scale,True,True) #getting exact values at correct scale 
+    try:
+        count+=1 
+        high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf_try) #finding bracket 
+        final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_try)   # finding exact scale 
+        resultsAtCorrectScale = solver(TstagA,Cf_try,final_scale,True,True) #getting exact values at correct scale 
 
-            Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
+        Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
 
-            Error_predicted = Predicted_PTPressure - true_PTPressure
+        Error_predicted = Predicted_PTPressure - true_PTPressure
 
-            error_norm = np.linalg.norm(Error_predicted, ord=1)
+        error_norm = np.linalg.norm(Error_predicted, ord=1)
 
-            logp = stats.norm.logpdf(error_norm, loc = true_errorNorm, scale = 1e4)
+        logp = stats.norm.logpdf(error_norm, loc = true_errorNorm, scale = errNorm_sigma)
 
-            errNorm.append(error_norm)
-            logplist.append(logp)
-            print(count)
-        except Exception as Cf_Fail:
-            print(f"Failed because of: {Cf_Fail}")
-
-
-    logp_array = np.array(logplist)
-    Cf_list = Cf_grid[:len(logp_array)]
-    errNorm_array = np.array(errNorm)
-    errNorm_sigma = 1e4
-    print(errNorm_sigma)
-    plt.figure()
-    plt.plot(Cf_list,errNorm_array, label = "err norms")
-    plt.axhline(y=true_errorNorm, color='red', label = "true error norm ")
-    plt.xlabel("Cf Values")
-    plt.ylabel("Nrom Error")
-    plt.legend()
-    plt.grid()
+        errNorm.append(error_norm)
+        logplist.append(logp)
+        print(count)
+    except Exception as Cf_Fail:
+        print(f"Failed because of: {Cf_Fail}")
 
 
-    plt.figure()
-    plt.plot(Cf_list,logp_array)
-    plt.xlabel("Cf Values")
-    plt.ylabel("Log Likelihood")
-    plt.grid()
-    plt.show()
+logp_array = np.array(logplist)
+Cf_list = Cf_grid[:len(logp_array)]
+errNorm_array = np.array(errNorm)
+plt.figure()
+plt.plot(Cf_list,errNorm_array, label = "err norms")
+plt.axhline(y=true_errorNorm, color='red', label = "true error norm ")
+plt.xlabel("Cf Values")
+plt.ylabel("Nrom Error")
+plt.legend()
+plt.grid()
 
+
+plt.figure()
+plt.plot(Cf_list,logp_array)
+plt.xlabel("Cf Values")
+plt.ylabel("Log Likelihood")
+plt.grid()
+plt.show()
+
+'''
+
+
+#MCMC functions
 
 @as_op(itypes=[pt.dscalar,pt.dvector,pt.dscalar,pt.dscalar],otypes=[pt.dscalar]) 
 def log_likelihood(Cf,true_PTPressure,true_errorNorm,errNorm_sigma):    
@@ -1137,126 +1113,167 @@ def log_likelihood(Cf,true_PTPressure,true_errorNorm,errNorm_sigma):
             traceback.print_exc()
             return np.array(-1.0e10, dtype=np.float64)
     
+errNorm_sigma = 1e3
+True_Cf = 0.005
+
+def generatingTrueValues(True_Cf):
+
+    high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf) #finding bracket 
+    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
+    resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
+
+    true_PTPressure = resultsAtCorrectScale["PT_P"]
+    true_Error = resultsAtCorrectScale["PT_P"] - resultsAtCorrectScale["PT_P"]
+    true_errorNorm = np.linalg.norm(true_Error,ord = 1)
+
+    return true_PTPressure,true_errorNorm
 
 #MCMC Model
-if __name__ == '__main__':
+def run_MCMC_case(caseConfig):
 
+    set_True_Cf = caseConfig["True_Cf"]
+    set_Prior_mu = caseConfig["Prior_mu"]
+    set_Prior_sigma = caseConfig["Prior_sigma"]
+    errNorm_sigma = caseConfig["errNorm_sigma"]
+
+    set_draws = caseConfig["Draws"]
+    set_tune = caseConfig["Tune"]
+    set_chains = caseConfig["Chains"]
+    set_cores = caseConfig["Cores"]
+
+    set_scale = caseConfig["Scale"]
+    set_scaling = caseConfig["Scaling"]
 
     with pm.Model() as model:
-        #prior for Cf
-        set_sigma = True_Cf * 0.05
-        set_mu = 0.0049
+      
+            timestamp = datetime.now().strftime("%H_%d_%m_%Y")
 
-        set_draws = 500
-        set_tune = 500
-        set_chains = 4
-        set_cores = 4
-        timestamp = datetime.now().strftime("%H_%d_%m_%Y")
+            run_label = (
+                f"{caseConfig['Case_Name']}_"
+                f"{timestamp}_"
+                f"draws{set_draws}_"
+                f"tunes{set_tune}_"
+                f"chains{set_chains}_"
+                f"cores{set_cores}_"
+            )
 
-        run_label = (
-            f"{timestamp}"
-            f"draws{set_draws}_"
-            f"tunes{set_tune}_"
-            f"chains{set_chains}_"
-            f"cores{set_cores}_"
-        )
-        
-        scale = 0.001 #magnitude of param
-        scaling = 0.1
-        prior_Cf = pm.TruncatedNormal("Cf", mu=set_mu,  sigma=set_sigma,lower = 0,initval=set_mu,default_transform=None)
-        
-        log_like = log_likelihood(prior_Cf,
-                                        pt.as_tensor_variable(true_PTPressure, dtype="float64"),         
-                                        pt.as_tensor_variable(true_errorNorm, dtype="float64"),        
-                                        pt.as_tensor_variable(errNorm_sigma, dtype="float64")  )
+            results_root = Path("MCMC Results")
+            results_root.mkdir(exist_ok = True)
 
-        pm.Potential("L1 Error Norm",log_like)
-        
-        step = pm.DEMetropolisZ(
-            vars = [prior_Cf],
-            S= np.array([scale]), 
-            scaling = scaling, #Initial scale factor for how aggressive the sampler jumps and stuff
-            tune="scaling",
-            tune_interval=100,
-            tune_drop_fraction=0.9
-        )
+            case_folder = results_root / run_label
+            case_folder.mkdir(exist_ok = True)
+
+            with open(case_folder/"config.txt", "w") as f:
+                for key,value in caseConfig.items():
+                    f.write(f"{key}: {value}\n")
 
 
-        trace = pm.sample(
-            draws=set_draws,
-            tune=set_tune,
-            step = step,
-            chains=set_chains,
-            cores = set_cores, 
-            progressbar=True,
-            return_inferencedata=True,
-            compute_convergence_checks=True,
-        )
+            true_PTPressure,true_errorNorm = generatingTrueValues(set_True_Cf)
+            prior_Cf = pm.TruncatedNormal("Cf", mu=set_Prior_mu,  sigma=set_Prior_sigma,lower = 0,initval=set_Prior_mu,default_transform=None)
+            
+            log_like = log_likelihood(prior_Cf,
+                                            pt.as_tensor_variable(true_PTPressure, dtype="float64"),         
+                                            pt.as_tensor_variable(true_errorNorm, dtype="float64"),        
+                                            pt.as_tensor_variable(errNorm_sigma, dtype="float64")  )
 
-        print("Sample stats")
-        print(list(trace.sample_stats.data_vars))
+            pm.Potential("L1 Error Norm",log_like)
+            
+            step = pm.DEMetropolisZ(
+                vars = [prior_Cf],
+                S= np.array([set_scale]), 
+                scaling = set_scaling, #Initial scale factor for how aggressive the sampler jumps and stuff
+                tune="scaling",
+                tune_interval=100,
+                tune_drop_fraction=0.9
+            )
 
-        acceptance_rate = None
-        accepted = None
+            trace = pm.sample(
+                draws=set_draws,
+                tune=set_tune,
+                step = step,
+                chains=set_chains,
+                cores = set_cores, 
+                progressbar=True,
+                return_inferencedata=True,
+                compute_convergence_checks=True,
+            )
 
-        if "accepted" in trace.sample_stats.data_vars:
-            accepted = trace.sample_stats["accepted"].values
-            acceptance_rate = np.mean(accepted)
+            print("Sample stats")
+            print(list(trace.sample_stats.data_vars))
 
-            print("Overall acceptance rate:", acceptance_rate)
-    
-    
+            acceptance_rate = None
+            accepted = None
+
+            if "accepted" in trace.sample_stats.data_vars:
+                accepted = trace.sample_stats["accepted"].values
+                acceptance_rate = np.mean(accepted)
+
+                print("Overall acceptance rate:", acceptance_rate)
 
     summary = az.summary(trace, var_names=["Cf"])
     print(summary)
 
+
     cf_samples = trace.posterior["Cf"].values.flatten()
 
-    with open(f"MCMC_report_{run_label}.txt","w") as f:
+
+    np.save(case_folder / "Cf_sample.npy",cf_samples)
+    
+    
+    print("True_Cf:", True_Cf)
+    print("Posterior mean:", np.mean(cf_samples))
+    print("Posterior median:", np.median(cf_samples))
+    print("5%-95%:", np.quantile(cf_samples, [0.05, 0.95]))
+
+
+    
+    with open(case_folder/ "MCMC_Report.txt", "w") as f:
 
         f.write("Settings:\n")
-        f.write(f"Truce CF = {True_Cf}\n")
-        f.write(f"Prior Mean = {set_mu}\n")
-        f.write(f"Prior Sigma = {set_sigma}\n")
+        f.write(f"Case Name  = {caseConfig['Case_Name']}\n")
+        f.write(f"True CF = {True_Cf}\n")
+        f.write(f"Prior Mean = {set_Prior_mu}\n")
+        f.write(f"Prior Sigma = {set_Prior_sigma}\n")
         f.write(f"Likelihood Mean = {true_errorNorm}\n")
         f.write(f"Likelihood Sigma = {errNorm_sigma}\n")
         f.write(f"Draws = {set_draws}\n")
         f.write(f"Tune = {set_tune}\n")
         f.write(f"Chains = {set_chains}\n")
         f.write(f"Cores = {set_cores}\n")
-        f.write(f"Scale = {scale}\n")
-        f.write(f"Scaling = {scaling}\n")
-        f.write(f"Acceptance Rate: {acceptance_rate}\n")
+        f.write(f"Scale = {set_scale}\n")
+        f.write(f"Scaling = {set_scaling}\n")
 
         f.write("ARVIZ Summary\n")
         f.write("---------------------\n")
         f.write(summary.to_string())
 
-    print("True_Cf:", True_Cf)
-    print("Posterior mean:", np.mean(cf_samples))
-    print("Posterior median:", np.median(cf_samples))
-    print("5%-95%:", np.quantile(cf_samples, [0.05, 0.95]))
+        f.write("Results\n")
+        f.write(f"Acceptance Rate: {acceptance_rate}\n")
+        f.write(f"Posterior Mean :{np.mean(cf_samples)}\n")
+        f.write(f"Posterior Median :{np.median(cf_samples)}\n")
+        f.write(f"Posterior STD :{np.std(cf_samples)}\n")
+
 
     # 1. trace plot
     az.plot_trace(trace, var_names=["Cf"])
     plt.title("Trace Plot")
     plt.tight_layout()
-    plt.savefig(f"{run_label}_Cf_trace.png", dpi=200)
-    plt.show()
+    TracePlot_path = case_folder / "Trace.png"
+    plt.savefig(TracePlot_path,dpi=200)
 
     # 2. posterior plot with true value
     az.plot_dist(trace, var_names=["Cf"])
     plt.title("Posterior Plot")
     plt.tight_layout()
-    plt.savefig(f"{run_label}_Cf_posterior.png", dpi=200)
-    plt.show()
+    PosteriorPlot_path = case_folder / "Posterior.png"
+    plt.savefig(PosteriorPlot_path,dpi=200)
 
     # 3. autocorrelation plot
     az.plot_autocorr(trace, var_names=["Cf"])
     plt.title("AutoCorrelationPlot")
     plt.tight_layout()
-    plt.savefig(f"{run_label}_Cf_autocorr_.png", dpi=200)
-    plt.show()
+    AutocorrPlot_path = case_folder / "Autocorr.png"
+    plt.savefig(AutocorrPlot_path,dpi=200)
 
     # 4. running mean plot
     running_mean = np.cumsum(cf_samples) / np.arange(1, len(cf_samples) + 1)
@@ -1269,8 +1286,81 @@ if __name__ == '__main__':
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(f"{run_label}_Cf_running_mean.png", dpi=200)
-    plt.show()
+    RunningMeanPlot_path = case_folder / "Running_mean.png"
+    plt.savefig(RunningMeanPlot_path,dpi=200)
+
+    az.from_netcdf(trace,case_folder/"trace.nc")
+
+
+if __name__ == "__main__":
+
+    case_name = sys.argv[1]
+
+    all_cases = {
+        "Case_1": {
+            "Case_Name": "Case_1",
+            "True_Cf": 0.005,
+            "Prior_mu" : 0.00475,
+            "Prior_sigma" : (0.05 * 0.005),
+            "errNorm_sigma" : 5e3,
+            "Draws" : 500,
+            "Tune" : 500,
+            "Chains" : 4 ,
+            "Cores" : 4,
+            "Scale" : 0.001,
+            "Scaling" : 1e-3
+    },
+
+        "Case_2": {
+            "Case_Name": "Case_2",
+            "True_Cf": 0.005,
+            "Prior_mu" : 0.00475,
+            "Prior_sigma" : (0.05 * 0.005),
+            "errNorm_sigma" : 5e3,
+            "Draws" : 500,
+            "Tune" : 500,
+            "Chains" : 4 ,
+            "Cores" : 4,
+            "Scale" : 0.001,
+            "Scaling" : 5e-3
+        },
+
+        "Case_3": {
+                "Case_Name": "Case_3",
+                "True_Cf": 0.005,
+                "Prior_mu" : 0.00475,
+                "Prior_sigma" : (0.05 * 0.005),
+                "errNorm_sigma" : 1e4,
+                "Draws" : 500,
+                "Tune" : 500,
+                "Chains" : 4 ,
+                "Cores" : 4,
+                "Scale" : 0.001,
+                "Scaling" : 1e-3
+            },
+    
+        "Case_4": {
+            "Case_Name": "Case_4",
+            "True_Cf": 0.005,
+            "Prior_mu" : 0.00475,
+            "Prior_sigma" : (0.05 * 0.005),
+            "errNorm_sigma" : 1e4,
+            "Draws" : 500,
+            "Tune" : 500,
+            "Chains" : 4 ,
+            "Cores" : 4,
+            "Scale" : 0.001,
+            "Scaling" : 5e-3
+        }
+    }
+  
+
+    case = all_cases[case_name]
+
+    run_MCMC_case(case)
+
+        
+
 
 
 
