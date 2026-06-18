@@ -1297,13 +1297,13 @@ if __name__ == "__main__":
             "True_Cf": 0.005,
             "Prior_mu" : 0.00475,
             "Prior_sigma" : (0.05 * 0.005),
-            "errNorm_sigma" : 5e3,
-            "Draws" : 500,
-            "Tune" : 500,
+            "errNorm_sigma" : 2e3,
+            "Draws" : 2000,
+            "Tune" : 1000,
             "Chains" : 4 ,
             "Cores" : 4,
             "Scale" : 0.001,
-            "Scaling" : 0.1
+            "Scaling" : 0.25
     },
 
         "Case_2": {
@@ -1311,13 +1311,13 @@ if __name__ == "__main__":
             "True_Cf": 0.005,
             "Prior_mu" : 0.00475,
             "Prior_sigma" : (0.05 * 0.005),
-            "errNorm_sigma" : 5e3,
-            "Draws" : 500,
-            "Tune" : 500,
+            "errNorm_sigma" : 2e3,
+            "Draws" : 2000,
+            "Tune" : 1000,
             "Chains" : 4 ,
             "Cores" : 4,
             "Scale" : 0.001,
-            "Scaling" : 1
+            "Scaling" : 0.75
         },
 
         "Case_3": {
@@ -1325,28 +1325,15 @@ if __name__ == "__main__":
                 "True_Cf": 0.005,
                 "Prior_mu" : 0.00475,
                 "Prior_sigma" : (0.05 * 0.005),
-                "errNorm_sigma" : 1e4,
-                "Draws" : 500,
-                "Tune" : 500,
+                "errNorm_sigma" : 2e3,
+                "Draws" : 2000,
+                "Tune" : 1000,
                 "Chains" : 4 ,
                 "Cores" : 4,
                 "Scale" : 0.001,
-                "Scaling" : 0.1
+                "Scaling" : 0.5
             },
-    
-        "Case_4": {
-            "Case_Name": "Case_4",
-            "True_Cf": 0.005,
-            "Prior_mu" : 0.00475,
-            "Prior_sigma" : (0.05 * 0.005),
-            "errNorm_sigma" : 1e4,
-            "Draws" : 500,
-            "Tune" : 500,
-            "Chains" : 4 ,
-            "Cores" : 4,
-            "Scale" : 0.001,
-            "Scaling" : 1
-        }
+  
     }
   
 

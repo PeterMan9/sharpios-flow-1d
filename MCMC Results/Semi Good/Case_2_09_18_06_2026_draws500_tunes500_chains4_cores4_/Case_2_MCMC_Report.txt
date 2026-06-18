@@ -1,0 +1,21 @@
+Settings:
+Case Name  = Case_2
+True CF = 0.005
+Prior Mean = 0.00475
+Prior Sigma = 0.00025
+Likelihood Mean = 0.0
+Likelihood Sigma = 5000.0
+Draws = 500
+Tune = 500
+Chains = 4
+Cores = 4
+Scale = 0.001
+Scaling = 0.75
+ARVIZ Summary
+---------------------
+        mean       sd eti89_lb eti89_ub  ess_bulk  ess_tail r_hat mcse_mean  mcse_sd
+Cf  0.004972  6.1e-05   0.0049   0.0051       239       138  1.04   3.9e-06  2.7e-06Results
+Acceptance Rate: 0.1685
+Posterior Mean :0.004972246761255241
+Posterior Median :0.004976548555097417
+Posterior STD :6.068056194673473e-05
