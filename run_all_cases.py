@@ -11,7 +11,7 @@ cases = [
 def run_case(CaseName):
     run_cmd = [
         sys.executable,
-        "Sharpios1dFlowP4.py",
+        "HyperReact1D_2param.py",
         CaseName
     ]
 

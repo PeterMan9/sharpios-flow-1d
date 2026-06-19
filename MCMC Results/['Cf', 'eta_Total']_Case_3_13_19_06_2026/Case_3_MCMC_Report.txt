@@ -1,0 +1,19 @@
+Parameters Included in Model = ['Cf', 'eta_Total']
+Case_3 Values 
+True CF = 0.005
+Cf Prior Mean = 0.00475
+Cf Prior Sigma = 0.00025
+Cf Scale = 0.001
+Cf Scaling = 0.25
+Eta Total Prior Mean = 0.76
+Eta Total Prior Sigma = 0.04000000000000001
+Eta Total Scale = 0.1
+Eta Total Scaling = 0.1
+Likelihood Mean = 0.0
+Likelihood Sigma = 2000.0
+
+ARVIZ Summary
+---------------------
+              mean      sd eti89_lb eti89_ub  ess_bulk  ess_tail r_hat mcse_mean  mcse_sd
+Cf         0.00503   9e-05   0.0049   0.0052         5        11  1.91   3.8e-05  2.3e-05
+eta_Total   0.7998  0.0005      0.8      0.8         6         9  1.69   0.00021  0.00014

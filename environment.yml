@@ -12,6 +12,6 @@ dependencies:
   - pip
   - gxx
   #- pip:
-    #- rtree
+    #- rtrea
     #- pymsis
     #- ./SDToolbox # Forced to use local version of SDToolbox unfortunately, as there is no repo

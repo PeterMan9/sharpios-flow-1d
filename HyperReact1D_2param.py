@@ -68,27 +68,14 @@ def Dh(x):
     return np.sqrt(geom_Area(x))
 
 def dAdx(x, tol = 1e-3):
-    if geometry_regions(x) == "Preburner":
+    region = geometry_regions(x)
+    if region == "Preburner" or region == "Test Section":
         return 0.0
-    elif geometry_regions(x) == "Throat":
+    elif region == "Throat" or region == "Conv Nozzle" or region == "Div Nozzle":
         xCurrent = x
-        xPrev = x - (x*tol)
+        xPrev = x - max((x*tol),1e-9)
         dA = geom_Area(xCurrent) - geom_Area(xPrev)
         return dA/(xCurrent - xPrev)
-    
-    elif geometry_regions(x) == "Conv Nozzle":
-        xCurrent = x
-        xPrev = x - (x*tol)
-        dA = geom_Area(xCurrent) - geom_Area(xPrev)
-        return dA/(xCurrent - xPrev)
-    
-    elif geometry_regions(x) == "Div Nozzle":
-        xCurrent = x
-        xPrev = x - (x*tol)
-        dA = geom_Area(xCurrent) - geom_Area(xPrev)
-        return dA/(xCurrent - xPrev)
-    else:
-        return 0.0
 
 def pressureTap(x_old, p_old, x_new, p_new, PT_locations):
     location = None
@@ -148,37 +135,36 @@ def Ymix(YA,mdotAir, YB, mdotH2):
 hpr_h2 = 120e6 #J/kg
 fst = 0.029
 phi = 0.2306
-eta_total = 1
 theta = 1
 x_react = 0
 
 def x_norm(x):
     return (x - x_react)/(preburner_length - x_react)
 
-def eta(x):
+def eta(x,eta_total):
     eta = eta_total * (theta * x_norm(x)/(1 + (theta - 1) * x_norm(x)))
     return eta
 
-def dPHI(x,dx):
+def dPHI(x,dx,eta_total):
     xcurrent = x
     xprev = x - dx
-    dPHI = phi * (eta(xcurrent) - eta(xprev))
+    dPHI = phi * (eta(xcurrent,eta_total) - eta(xprev,eta_total))
     return dPHI
 
-def dHtdx(x,dx):
+def dHtdx(x,dx,eta_total):
     if x <= preburner_length:
-        return (dPHI(x,dx) * hpr_h2 * fst)/dx
+        return (dPHI(x,dx,eta_total) * hpr_h2 * fst)/dx
     else:
         return 0
 
-def residualT(T_new,T_old,xOld,uOld,uNew,dx):
-    T_gasProperties_old = gas_properties(T_old, 101325, Y_mix)
-    T_gasProperties_new = gas_properties(T_new, 101325, Y_mix)
+def residualT(T_new,T_old,xOld,uOld,uNew,dx,eta_total,P):
+    T_gasProperties_old = gas_properties(T_old, P, Y_mix)
+    T_gasProperties_new = gas_properties(T_new, P, Y_mix)
     ht_old = T_gasProperties_old["h"]
     ht_new = T_gasProperties_new["h"]
     term1 = (ht_new - ht_old)
     term2 = (uNew**2 - uOld**2)/2
-    term3 = dHtdx(xOld,dx) * dx
+    term3 = dHtdx(xOld,dx,eta_total) * dx
     return term1 + term2 - term3
 
 #initial conditions
@@ -258,25 +244,25 @@ def mdotFuncX (x):
         return mdot_i + injMdot 
 
 #1st order ODE Functions
-def dVdX (V,A,M,T,P,mdot,dmdotDX, Cf, x,dx): #first 4 parts of sharpios 1d flow eqn converted to dV/dx
+def dVdX (V,A,M,T,P,mdot,dmdotDX, Cf, x,dx,eta_total): #first 4 parts of sharpios 1d flow eqn converted to dV/dx
     gas_Prop = gas_properties(T, P, Y_mix)
     cp = gas_Prop["cp"]
     gamma = gas_Prop["gamma"]
 
     term1 = ((-V)/(A * (1 - M**2)))* dAdx(x)
-    term2 = ((V/((1-M**2) * cp * T)) * dHtdx(x,dx))
+    term2 = ((V/((1-M**2) * cp * T)) * dHtdx(x,dx,eta_total))
     term3 = ((gamma *M**2)/(2 * (1 - M**2)))
     term4 = ((((4 * Cf * V)/Dh(x))) - (2*(Vinj/mdot) * dmdotDX))
     term5 = (((V*(1 + gamma * M**2))/((1-M**2)*mdot)) * (dmdotDX))
     return term1 + term2 + (term3*term4) + term5
 
-def dPdX (V,A,M,T,P,mdot,dmdotDX, Cf, x,dx): #first 4 parts of sharpios 1d flow eqn converted to dP/dx
+def dPdX (V,A,M,T,P,mdot,dmdotDX, Cf, x,dx,eta_total): #first 4 parts of sharpios 1d flow eqn converted to dP/dx
     gas_Prop = gas_properties(T, P, Y_mix)
     cp = gas_Prop["cp"]
     gamma = gas_Prop["gamma"]
 
     term1 = ((gamma * M**2 * P)/(A * (1 - M**2))) * dAdx(x)
-    term2 = -(((gamma * M**2 * P)/((1-M**2) * cp * T)) * dHtdx(x,dx))
+    term2 = -(((gamma * M**2 * P)/((1-M**2) * cp * T)) * dHtdx(x,dx,eta_total))
     term3  = -((gamma * M**2 * (1 + (gamma-1) * M**2))/(2 * (1 - M**2)))
     term4 = (((4 * Cf * (P/Dh(x)))) - (2 * ((Vinj * P)/(mdot * V)) * (dmdotDX)))
     term5 = -(((2 * gamma * M**2 * (1 + ((gamma-1)/2) *M**2)*P)/((1-M**2)*mdot)) * (dmdotDX))
@@ -337,13 +323,13 @@ def E4_InjB_CV(PstagB_2, uB_2, TB_2): #third cv equation check power point for i
     return rhoB * uB_2 * A_H2Injs - mdotH2
 
 def E5_InjA_CV(TA_2,uA_2):
-    preinjA_gasProperties = gas_properties(TA_2, None, get_Y("O2:0.21, N2:0.79"))
+    preinjA_gasProperties = gas_properties(TA_2, 101325, get_Y("O2:0.21, N2:0.79"))
     part1_partial = (((preinjA_gasProperties["gamma"] - 1)/2) * ((uA_2)**2)/(soS(TA_2, R_air, preinjA_gasProperties["gamma"])**2))
     part1 = (1 + part1_partial)
     return (TA_2 * part1) - TstagA
 
 def E6_InjB_CV(TB_2,uB_2):
-    preinjB_gasProperties = gas_properties(TB_2, None, get_Y("H2:1.0"))
+    preinjB_gasProperties = gas_properties(TB_2, 101325, get_Y("H2:1.0"))
     part1_partial = (((preinjB_gasProperties["gamma"] - 1)/2) * ((uB_2)**2)/(soS(TB_2, R_H2, preinjB_gasProperties["gamma"])**2))
     part1 = (1 + part1_partial)
     return (TB_2 * part1) - TstagB
@@ -398,14 +384,14 @@ def CV_toPreburner(u2,T2,uA,uB,TA,TB): #this is newton raphson for the CV it goe
 
     return u2, T2
 
-def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx):
+def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx,eta_total,P):
     numIters = 0
     tol = 1e-8
-    E = residualT(T_Guess, T_old, xOld, uOld, uNew, dx)
+    E = residualT(T_Guess, T_old, xOld, uOld, uNew, dx,eta_total,P)
 
     while abs(E) >= tol and numIters <= 100:
         deltaT = max(abs(T_Guess)*1e-6, 1e-6)
-        dEdT = (residualT(T_Guess + deltaT, T_old, xOld, uOld, uNew, dx) - E)/deltaT
+        dEdT = (residualT(T_Guess + deltaT, T_old, xOld, uOld, uNew, dx,eta_total,P) - E)/deltaT
 
         if not np.isfinite(dEdT) or abs(dEdT) < 1e-14:
             raise RuntimeError("Bad temperature Newton derivative")
@@ -420,7 +406,7 @@ def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx):
                 lamda *= 0.5
                 continue
 
-            E_new = residualT(T_new, T_old, xOld, uOld, uNew, dx)
+            E_new = residualT(T_new, T_old, xOld, uOld, uNew, dx,eta_total,P)
 
             if np.isfinite(E_new) and abs(E_new) < abs(E):
                 accepted = True
@@ -487,7 +473,7 @@ def newtonRaphson_P(P_guess, Pstag, T, gamma):
 
 #rk45
 
-def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
+def rk45Step(V,P,Cf, h, x, T_preburner,eta_total): #add stages for each mdot 3
     accepted = False 
     tol = 1e-6
     location = geometry_regions(x)
@@ -517,57 +503,57 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
             h *= 0.5
             continue
         M1 = mNum(V1,a1)
-        k1V = h * dVdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf,x1,h)
-        k1P = h * dPdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf,x1,h)
+        k1V = h * dVdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf,x1,h,eta_total)
+        k1P = h * dPdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf,x1,h,eta_total)
 
         x2 = x1 + 1/5 * h
         A2 = geom_Area(x2)
         V2 = V + 1/5 * k1V 
         P2 = P + 1/5 * k1P
         try:
-            T2 = newtonRaphson_T(T1, T1, x1, V1, V2, 1/5 * h)
+            T2 = newtonRaphson_T(T1, T1, x1, V1, V2, 1/5 * h,eta_total,P2)
             a2 = soS(T2,R_mix,gas_properties(T2, P2, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue
         M2 = mNum(V2,a2)
-        k2V = h * dVdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf,x2,1/5 * h)
-        k2P = h * dPdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf,x2,1/5 * h)
+        k2V = h * dVdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf,x2,1/5 * h,eta_total)
+        k2P = h * dPdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf,x2,1/5 * h,eta_total)
 
         x3 = x1 + 3/10 * h
         A3 = geom_Area(x3)
         V3 = V + 3/40 * k1V + 9/40 * k2V
         P3 = P + 3/40 * k1P + 9/40 * k2P
         try:
-            T3 = newtonRaphson_T(T1, T1, x1, V1, V3, 3/10 * h) 
+            T3 = newtonRaphson_T(T1, T1, x1, V1, V3, 3/10 * h,eta_total,P3) 
             a3 = soS(T3,R_mix,gas_properties(T3, P3, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue
         M3 = mNum(V3,a3)
-        k3V = h * dVdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf,x3,3/10 * h)
-        k3P = h * dPdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf,x3,3/10 * h)
+        k3V = h * dVdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf,x3,3/10 * h,eta_total)
+        k3P = h * dPdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf,x3,3/10 * h,eta_total)
 
         x4 = x1 + 4/5 * h
         A4 = geom_Area(x4)
         V4 = V + 44/45 * k1V - 56/15 * k2V + 32/9 * k3V
         P4 = P + 44/45 * k1P - 56/15 * k2P + 32/9 * k3P
         try:
-            T4 = newtonRaphson_T(T1, T1, x1, V1, V4, 4/5 * h) 
+            T4 = newtonRaphson_T(T1, T1, x1, V1, V4, 4/5 * h,eta_total,P4) 
             a4 = soS(T4,R_mix,gas_properties(T4, P4, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue
         M4 = mNum(V4,a4)
-        k4V = h * dVdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf,x4,4/5 * h)
-        k4P = h * dPdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf,x4,4/5 * h)
+        k4V = h * dVdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf,x4,4/5 * h,eta_total)
+        k4P = h * dPdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf,x4,4/5 * h,eta_total)
 
         x5 = x1 + 8/9 * h
         A5 = geom_Area(x5)
         V5 = V + 19372/6561 * k1V - 25360/2187 * k2V + 64448/6561 * k3V - 212/729 * k4V
         P5 = P + 19372/6561 * k1P - 25360/2187 * k2P + 64448/6561 * k3P - 212/729 * k4P
         try:
-            T5 = newtonRaphson_T(T1, T1, x1, V1, V5, 8/9 * h)
+            T5 = newtonRaphson_T(T1, T1, x1, V1, V5, 8/9 * h,eta_total,P5)
             a5 = soS(T5,R_mix,gas_properties(T5, P5, Y_mix)["gamma"])
 
         except:
@@ -575,23 +561,23 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
             continue
 
         M5 = mNum(V5,a5)
-        k5V = h * dVdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf,x5,8/9 * h)
-        k5P = h * dPdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf,x5,8/9 * h)
+        k5V = h * dVdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf,x5,8/9 * h,eta_total)
+        k5P = h * dPdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf,x5,8/9 * h,eta_total)
 
         x6 = x1 + h
         A6 = geom_Area(x6)
         V6 = V + 9017/3168 * k1V - 355/33 * k2V + 46732/5247 * k3V + 49/176 * k4V - 5103/18656 * k5V
         P6 = P + 9017/3168 * k1P - 355/33 * k2P + 46732/5247 * k3P + 49/176 * k4P - 5103/18656 * k5P
         try:
-            T6 = newtonRaphson_T(T1, T1, x1, V1, V6, 1 * h)
+            T6 = newtonRaphson_T(T1, T1, x1, V1, V6, 1 * h,eta_total,P6)
             a6 = soS(T6,R_mix,gas_properties(T6, P6, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue
 
         M6 = mNum(V6,a6)
-        k6V = h * dVdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf,x6,h)
-        k6P = h * dPdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf,x6,h)
+        k6V = h * dVdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf,x6,h,eta_total)
+        k6P = h * dPdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf,x6,h,eta_total)
 
         #5th order solution 
         v_5Order = V + 35/384 * k1V + 500/1113 * k3V + 125/192 * k4V - 2187/6784 * k5V + 11/84 * k6V
@@ -602,14 +588,14 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
         V7 = v_5Order
         P7 = p_5Order
         try:
-            T7 = newtonRaphson_T(T1, T1, x1, V1, V7, 1 * h)
+            T7 = newtonRaphson_T(T1, T1, x1, V1, V7, 1 * h,eta_total,P7)
             a7 = soS(T7,R_mix,gas_properties(T7, P7, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue       
         M7 = mNum(V7,a7)
-        k7V = h * dVdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf,x7,h)
-        k7P = h * dPdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf,x7,h)
+        k7V = h * dVdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf,x7,h,eta_total)
+        k7P = h * dPdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf,x7,h,eta_total)
 
         #4th order solution
         v_4Order = V + 5179/57600 * k1V + 7571/16695 * k3V + 393/640 * k4V - 92097/339200 * k5V + 187/2100 * k6V + 1/40 * k7V
@@ -633,7 +619,7 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
 
             Vnext, Pnext = v_5Order, p_5Order
             xNext = x1 + h
-            Tnext = newtonRaphson_T(T1, T1, x1, V1, Vnext, 1 * h)
+            Tnext = newtonRaphson_T(T1, T1, x1, V1, Vnext, 1 * h,eta_total,Pnext)
 
             errorRatio = max(
                 errorV/(abs(V) * local_tol), errorP/(abs(P) * local_tol))
@@ -648,7 +634,7 @@ def rk45Step(V,P,Cf, h, x, T_preburner): #add stages for each mdot 3
 
 
 #Full Solver
-def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
+def solver(Preburner_TStag,Cf,eta_total,scale, acceptedScale, postThroatSolve):
     global mdot,Vinj #making them global so that i can use them in rk45 and ode functions
     Vinj = 0
 
@@ -715,7 +701,7 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
         Vbefore = velocities[-1]
         Pbefore = pressure[-1]
         Tbefore = temp [-1]
-        xNext, VCurrent, PCurrent, TCurrent, hNext, location = rk45Step(Vbefore,Pbefore, Cf,hPrev, xPrev,Tbefore)
+        xNext, VCurrent, PCurrent, TCurrent, hNext, location = rk45Step(Vbefore,Pbefore, Cf,hPrev, xPrev,Tbefore,eta_total)
 
 
         if location == "Preburner":
@@ -807,16 +793,8 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
 
                 pt_location.append(pt_x)
                 pt_pressures.append(pt_P)
-
-
-
         else:
             continue
-
-
-    #if machNum[-1] <0.99:
-        #print("flow did NOT CHOKE. final Mach number: ", machNum[-1])
-        #print("x at end of solve: ", xList[-1])
 
     #converting to np arrays
     V_List = np.array(velocities)
@@ -867,26 +845,26 @@ def solver(Preburner_TStag,Cf,scale, acceptedScale, postThroatSolve):
 
 #Sweeping
 
-def chokedLocationResiduals(scale, Cf):
-    results = solver(TstagA,Cf,scale,False,False)
+def chokedLocationResiduals(scale, Cf,eta_total):
+    results = solver(TstagA,Cf,eta_total,scale,False,False)
     x_Choke = results["x"][-1]
     residual = throat_loc - x_Choke  #we want this to be zero
     return residual
     
-def eval_scale(scale,Cf):
+def eval_scale(scale,Cf,eta_total):
     #scale, Cf = args
     try:
-        res = chokedLocationResiduals(scale, Cf)
+        res = chokedLocationResiduals(scale, Cf,eta_total)
         return scale, res
     except Exception as eS:
         print("Scale Failed ", scale, eS)
         traceback.print_exc()
         return scale, np.nan
    
-def scaling_InletPressure_NOTPar(Cf):
+def scaling_InletPressure_NOTPar(Cf,eta_total):
 
     max_scale = 1.0
-    max_res = chokedLocationResiduals(max_scale, Cf)
+    max_res = chokedLocationResiduals(max_scale, Cf,eta_total)
 
     if max_res > 0:
         direction = 1
@@ -901,7 +879,7 @@ def scaling_InletPressure_NOTPar(Cf):
     for i in range(1, 21):
         try:
             cur_scale = max_scale + direction * (i/10)
-            cur_scale, cur_res = eval_scale(cur_scale,Cf)
+            cur_scale, cur_res = eval_scale(cur_scale,Cf,eta_total)
         except Exception as eS:
             print(f"Failed because of: {eS}")
             traceback.print_exc()
@@ -917,7 +895,7 @@ def scaling_InletPressure_NOTPar(Cf):
         prev_res = cur_res
 
 
-def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf):
+def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf,eta_total):
 
     tol = 1e-6
     maxIters = 100
@@ -954,7 +932,7 @@ def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf):
         else:
             scale_candidate = 0.5 * (scale_low + scale_high)
 
-        res_candidate = chokedLocationResiduals(scale_candidate, Cf)
+        res_candidate = chokedLocationResiduals(scale_candidate, Cf,eta_total)
 
         # Track best residual seen
         if abs(res_candidate) < abs(best_res):
@@ -1028,15 +1006,6 @@ plt.show()
 '''
 
 
-#MCMC set up
-#using black box approach 
-
-# wrapper for Op var. basically tells log_likelihood func that i am just putting in a double prec scalar and will
-# output a double precision scalar 
-# this is just so that i can easily pas my prior into my function 
-
-
-
 '''
 Cf_grid = np.linspace(True_Cf - 0.002, True_Cf+0.002, 50)
 logplist = []
@@ -1090,19 +1059,29 @@ plt.show()
 '''
 
 
+
+#MCMC set up
+#using black box approach 
+
+# wrapper for Op var. basically tells log_likelihood func that i am just putting in a double prec scalar and will
+# output a double precision scalar 
+# this is just so that i can easily pas my prior into my function 
+
 #MCMC functions
 
-@as_op(itypes=[pt.dscalar,pt.dvector,pt.dscalar,pt.dscalar],otypes=[pt.dscalar]) 
-def log_likelihood(Cf,true_PTPressure,true_errorNorm,errNorm_sigma):    
+@as_op(itypes=[pt.dscalar,pt.dscalar,pt.dvector,pt.dscalar,pt.dscalar],otypes=[pt.dscalar]) 
+def log_likelihood(Cf,eta_total,true_PTPressure,true_errorNorm,errNorm_sigma):    
     Cf = float(Cf)
+    eta_total = float(eta_total)
     errNorm_sigma = float(errNorm_sigma)
-    try:
-        high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf) #finding bracket 
-        final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf)   # finding exact scale 
-        resultsAtCorrectScale = solver(TstagA,Cf,final_scale,True,True) #getting exact values at correct scale 
-        Predicted_PTPRessure = resultsAtCorrectScale["PT_P"]
 
-        Error_predicted = Predicted_PTPRessure - true_PTPressure
+    try:
+        high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf,eta_total) #finding bracket 
+        final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf,eta_total)   # finding exact scale 
+        resultsAtCorrectScale = solver(TstagA,Cf,eta_total,final_scale,True,True) #getting exact values at correct scale 
+        Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
+
+        Error_predicted = Predicted_PTPressure - true_PTPressure
         error_norm = np.linalg.norm(Error_predicted, ord=1)
         log_prob = stats.norm.logpdf(error_norm,loc = true_errorNorm,scale = errNorm_sigma)
 
@@ -1116,11 +1095,11 @@ def log_likelihood(Cf,true_PTPressure,true_errorNorm,errNorm_sigma):
 errNorm_sigma = 1e3
 True_Cf = 0.005
 
-def generatingTrueValues(True_Cf):
+def generatingTrueValues(True_Cf,True_eta_total):
 
-    high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf) #finding bracket 
-    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
-    resultsAtCorrectScale = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
+    high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf,True_eta_total) #finding bracket 
+    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf,True_eta_total)   # finding exact scale 
+    resultsAtCorrectScale = solver(TstagA,True_Cf,True_eta_total,final_scale,True,True) #getting exact values at correct scale 
 
     true_PTPressure = resultsAtCorrectScale["PT_P"]
     true_Error = resultsAtCorrectScale["PT_P"] - resultsAtCorrectScale["PT_P"]
@@ -1131,9 +1110,18 @@ def generatingTrueValues(True_Cf):
 #MCMC Model
 def run_MCMC_case(caseConfig):
 
+    param_names = caseConfig["Parameters"]
     set_True_Cf = caseConfig["True_Cf"]
-    set_Prior_mu = caseConfig["Prior_mu"]
-    set_Prior_sigma = caseConfig["Prior_sigma"]
+    set_Cf_Prior_mu = caseConfig["Cf_Prior_mu"]
+    set_Cf_Prior_sigma = caseConfig["Cf_Prior_sigma"]
+    set_Cf_scale = caseConfig["Cf_Scale"]
+    set_Cf_scaling = caseConfig["Cf_Scaling"]
+
+    set_True_eta_Total = caseConfig["True_eta_Total"]
+    set_eta_Total_Prior_mu = caseConfig["eta_Total_Prior_mu"]
+    set_eta_Total_Prior_sigma = caseConfig["eta_Total_Prior_sigma"]
+    set_eta_Total_scale = caseConfig["eta_Total_Scale"]
+    set_eta_Total_scaling = caseConfig["eta_Total_Scaling"]
     errNorm_sigma = caseConfig["errNorm_sigma"]
 
     set_draws = caseConfig["Draws"]
@@ -1141,20 +1129,14 @@ def run_MCMC_case(caseConfig):
     set_chains = caseConfig["Chains"]
     set_cores = caseConfig["Cores"]
 
-    set_scale = caseConfig["Scale"]
-    set_scaling = caseConfig["Scaling"]
-
     with pm.Model() as model:
       
             timestamp = datetime.now().strftime("%H_%d_%m_%Y")
 
             run_label = (
+                f"{param_names}_"
                 f"{caseConfig['Case_Name']}_"
-                f"{timestamp}_"
-                f"draws{set_draws}_"
-                f"tunes{set_tune}_"
-                f"chains{set_chains}_"
-                f"cores{set_cores}_"
+                f"{timestamp}"
             )
             nameofCase = caseConfig["Case_Name"]
 
@@ -1169,10 +1151,11 @@ def run_MCMC_case(caseConfig):
                     f.write(f"{key}: {value}\n")
 
 
-            true_PTPressure,true_errorNorm = generatingTrueValues(set_True_Cf)
-            prior_Cf = pm.TruncatedNormal("Cf", mu=set_Prior_mu,  sigma=set_Prior_sigma,lower = 0,initval=set_Prior_mu,default_transform=None)
-            
-            log_like = log_likelihood(prior_Cf,
+            true_PTPressure,true_errorNorm = generatingTrueValues(set_True_Cf,set_True_eta_Total)
+            prior_Cf = pm.TruncatedNormal("Cf", mu=set_Cf_Prior_mu,  sigma=set_Cf_Prior_sigma,lower = 0,initval=set_Cf_Prior_mu,default_transform=None)
+            prior_eta_Total = pm.TruncatedNormal("eta_Total", mu=set_eta_Total_Prior_mu, sigma = set_eta_Total_Prior_sigma, lower = 0, upper = 1, initval=set_eta_Total_Prior_mu, default_transform=None)
+
+            log_like = log_likelihood(prior_Cf,prior_eta_Total,
                                             pt.as_tensor_variable(true_PTPressure, dtype="float64"),         
                                             pt.as_tensor_variable(true_errorNorm, dtype="float64"),        
                                             pt.as_tensor_variable(errNorm_sigma, dtype="float64")  )
@@ -1180,9 +1163,9 @@ def run_MCMC_case(caseConfig):
             pm.Potential("L1 Error Norm",log_like)
             
             step = pm.DEMetropolisZ(
-                vars = [prior_Cf],
-                S= np.array([set_scale]), 
-                scaling = set_scaling, #Initial scale factor for how aggressive the sampler jumps and stuff
+                vars = [prior_Cf,prior_eta_Total],
+                S= np.array([set_Cf_scale,set_eta_Total_scale]), 
+                scaling = np.array([set_Cf_scaling,set_eta_Total_scaling]),  #Initial scale factor for how aggressive the sampler jumps and stuff
                 tune="scaling",
                 tune_interval=100,
                 tune_drop_fraction=0.9
@@ -1211,80 +1194,111 @@ def run_MCMC_case(caseConfig):
 
                 print("Overall acceptance rate:", acceptance_rate)
 
-    summary = az.summary(trace, var_names=["Cf"])
-    print(summary)
+    summary = az.summary(trace)
 
     cf_samples = trace.posterior["Cf"].values.flatten()
+    eta_Total_samples = trace.posterior["eta_Total"].values.flatten()
+    corr = np.corrcoef(cf_samples,eta_Total_samples)[0,1]
     
-    print("True_Cf:", set_True_Cf)
-    print("Posterior mean:", np.mean(cf_samples))
-    print("Posterior median:", np.median(cf_samples))
-    print("5%-95%:", np.quantile(cf_samples, [0.05, 0.95]))
-
     with open(case_folder/ f"{nameofCase}_MCMC_Report.txt", "w") as f:
+        f.write(f"Parameters Included in Model = {param_names}\n")
 
-        f.write("Settings:\n")
-        f.write(f"Case Name  = {caseConfig['Case_Name']}\n")
+        f.write(f"{caseConfig['Case_Name']} Values \n")
         f.write(f"True CF = {set_True_Cf}\n")
-        f.write(f"Prior Mean = {set_Prior_mu}\n")
-        f.write(f"Prior Sigma = {set_Prior_sigma}\n")
+        f.write(f"Cf Prior Mean = {set_Cf_Prior_mu}\n")
+        f.write(f"Cf Prior Sigma = {set_Cf_Prior_sigma}\n")
+        f.write(f"Cf Scale = {set_Cf_scale}\n")
+        f.write(f"Cf Scaling = {set_Cf_scaling}\n")
+
+        f.write(f"Eta Total Prior Mean = {set_eta_Total_Prior_mu}\n")
+        f.write(f"Eta Total Prior Sigma = {set_eta_Total_Prior_sigma}\n")
+        f.write(f"Eta Total Scale = {set_eta_Total_scale}\n")
+        f.write(f"Eta Total Scaling = {set_eta_Total_scaling}\n")
+
         f.write(f"Likelihood Mean = {true_errorNorm}\n")
         f.write(f"Likelihood Sigma = {errNorm_sigma}\n")
+
+        f.write("\nARVIZ Summary\n")
+        f.write("---------------------\n")
+        f.write(f.write(summary.to_string()))
+        f.write(f"\nParameter Results:\n")
+
+        for param in summary.index:
+            mean = summary.loc[param,"mean"]
+            sd = summary.loc[param,"sd"]
+            eti89_lb = summary.loc[param,"eti89_lb"]
+            eti89_ub = summary.loc[param,"eti89_ub"]
+            f.write(f"{param}\n")
+            f.write(f"Mean: {mean}\n")
+            f.write(f"SD: {sd}\n")
+            f.write(f"eti89_lb: {eti89_lb} eti89_ub: {eti89_ub}\n")
+        
+    
+        f.write("\nOther Results and metrics \n")
+        f.write(f"Acceptance Rate: {acceptance_rate}\n")
+        f.write(f"Cf-Eta Total, Correlation Coeff: {corr}\n")
+
+        f.write("\nSettings:\n")
         f.write(f"Draws = {set_draws}\n")
         f.write(f"Tune = {set_tune}\n")
         f.write(f"Chains = {set_chains}\n")
         f.write(f"Cores = {set_cores}\n")
-        f.write(f"Scale = {set_scale}\n")
-        f.write(f"Scaling = {set_scaling}\n")
 
-        f.write("ARVIZ Summary\n")
-        f.write("---------------------\n")
-        f.write(summary.to_string())
+    for param in summary.index:
+        # 1. trace plot
+        az.plot_trace(trace, var_names=[param])
+        plt.title("Trace Plot")
+        plt.tight_layout()
+        TracePlot_path = case_folder / f"{param}_{nameofCase}_Trace.png"
+        plt.savefig(TracePlot_path,dpi=200)
+        plt.close()
 
-        f.write("Results\n")
-        f.write(f"Acceptance Rate: {acceptance_rate}\n")
-        f.write(f"Posterior Mean :{np.mean(cf_samples)}\n")
-        f.write(f"Posterior Median :{np.median(cf_samples)}\n")
-        f.write(f"Posterior STD :{np.std(cf_samples)}\n")
+        # 2. posterior plot with true value
+        az.plot_dist(trace, var_names=[param])
+        plt.title("Posterior Plot")
+        plt.tight_layout()
+        PosteriorPlot_path = case_folder / f"{param}_{nameofCase}_Posterior.png"
+        plt.savefig(PosteriorPlot_path,dpi=200)
+        plt.close()
 
-    # 1. trace plot
-    az.plot_trace(trace, var_names=["Cf"])
-    plt.title("Trace Plot")
-    plt.tight_layout()
-    TracePlot_path = case_folder / f"{nameofCase}_Trace.png"
-    plt.savefig(TracePlot_path,dpi=200)
-    plt.close()
-
-    # 2. posterior plot with true value
-    az.plot_dist(trace, var_names=["Cf"])
-    plt.title("Posterior Plot")
-    plt.tight_layout()
-    PosteriorPlot_path = case_folder / f"{nameofCase}_Posterior.png"
-    plt.savefig(PosteriorPlot_path,dpi=200)
-    plt.close()
-
-    # 3. autocorrelation plot
-    az.plot_autocorr(trace, var_names=["Cf"])
-    plt.title("AutoCorrelationPlot")
-    plt.tight_layout()
-    AutocorrPlot_path = case_folder / f"{nameofCase}_Autocorr.png"
-    plt.savefig(AutocorrPlot_path,dpi=200)
-    plt.close()
+        # 3. autocorrelation plot
+        az.plot_autocorr(trace, var_names=[param])
+        plt.title("AutoCorrelationPlot")
+        plt.tight_layout()
+        AutocorrPlot_path = case_folder / f"{param}_{nameofCase}_Autocorr.png"
+        plt.savefig(AutocorrPlot_path,dpi=200)
+        plt.close()
 
     # 4. running mean plot
-    running_mean = np.cumsum(cf_samples) / np.arange(1, len(cf_samples) + 1)
-
+    running_mean_cf = np.cumsum(cf_samples) / np.arange(1, len(cf_samples) + 1)    
     plt.figure()
-    plt.plot(running_mean)
+    plt.plot(running_mean_cf)
     plt.axhline(set_True_Cf, linestyle="--", label="True Cf")
     plt.xlabel("Sample")
     plt.ylabel("Running mean of Cf")
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    RunningMeanPlot_path = case_folder / f"{nameofCase}_Running_mean.png"
+    RunningMeanPlot_path = case_folder / f"Cf_{nameofCase}_Running_mean.png"
     plt.savefig(RunningMeanPlot_path,dpi=200)
     plt.close()
+
+    running_mean_eta_Total = np.cumsum(eta_Total_samples) / np.arange(1, len(eta_Total_samples) + 1)    
+    plt.figure()
+    plt.plot(running_mean_eta_Total)
+    plt.axhline(set_True_eta_Total, linestyle="--", label="True Eta Total")
+    plt.xlabel("Sample")
+    plt.ylabel("Running mean of Eta Total")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    RunningMeanPlot_path = case_folder / f"Eta_Total_{nameofCase}_Running_mean.png"
+    plt.savefig(RunningMeanPlot_path,dpi=200)
+    plt.close()
+
+    az.plot_pair(trace,var_names = ["Cf","eta_Total"],
+                 kinda = "kde",
+                 marginals = True)
 
 #cases and running model 
 if __name__ == "__main__":
@@ -1294,46 +1308,70 @@ if __name__ == "__main__":
     all_cases = {
         "Case_1": {
             "Case_Name": "Case_1",
+            "Parameters": ["Cf", "eta_Total"],
             "True_Cf": 0.005,
-            "Prior_mu" : 0.00475,
-            "Prior_sigma" : (0.05 * 0.005),
+            "Cf_Prior_mu" : 0.00475,
+            "Cf_Scale" : 0.001,
+            "Cf_Scaling" : 0.25,
+            "Cf_Prior_sigma" : (0.05 * 0.005),
+
+            "True_eta_Total" : 0.8,
+            "eta_Total_Prior_mu": 0.76,
+            "eta_Total_Prior_sigma": (0.05 * 0.8),
+            "eta_Total_Scale" : 0.1,
+            "eta_Total_Scaling":1,
+
             "errNorm_sigma" : 2e3,
-            "Draws" : 2000,
-            "Tune" : 1000,
-            "Chains" : 4 ,
-            "Cores" : 4,
-            "Scale" : 0.001,
-            "Scaling" : 0.25
+            "Draws" : 50,
+            "Tune" : 50,
+            "Chains" : 1 ,
+            "Cores" : 1
+            
     },
 
         "Case_2": {
             "Case_Name": "Case_2",
+            "Parameters": ["Cf", "eta_Total"],
             "True_Cf": 0.005,
-            "Prior_mu" : 0.00475,
-            "Prior_sigma" : (0.05 * 0.005),
+            "Cf_Prior_mu" : 0.00475,
+            "Cf_Scale" : 0.001,
+            "Cf_Scaling" : 0.25,
+            "Cf_Prior_sigma" : (0.05 * 0.005),
+
+            "True_eta_Total" : 0.8,
+            "eta_Total_Prior_mu": 0.76,
+            "eta_Total_Prior_sigma": (0.05 * 0.8),
+            "eta_Total_Scale" : 0.1,
+            "eta_Total_Scaling":0.5,
+
             "errNorm_sigma" : 2e3,
-            "Draws" : 2000,
-            "Tune" : 1000,
-            "Chains" : 4 ,
-            "Cores" : 4,
-            "Scale" : 0.001,
-            "Scaling" : 0.75
+            "Draws" : 50,
+            "Tune" : 50,
+            "Chains" : 1 ,
+            "Cores" : 1
         },
 
         "Case_3": {
-                "Case_Name": "Case_3",
-                "True_Cf": 0.005,
-                "Prior_mu" : 0.00475,
-                "Prior_sigma" : (0.05 * 0.005),
-                "errNorm_sigma" : 2e3,
-                "Draws" : 2000,
-                "Tune" : 1000,
-                "Chains" : 4 ,
-                "Cores" : 4,
-                "Scale" : 0.001,
-                "Scaling" : 0.5
-            },
-  
+            "Case_Name": "Case_3",
+            "Parameters": ["Cf", "eta_Total"],
+            "True_Cf": 0.005,
+            "Cf_Prior_mu" : 0.00475,
+            "Cf_Scale" : 0.001,
+            "Cf_Scaling" : 0.25,
+            "Cf_Prior_sigma" : (0.05 * 0.005),
+
+            "True_eta_Total" : 0.8,
+            "eta_Total_Prior_mu": 0.76,
+            "eta_Total_Prior_sigma": (0.05 * 0.8),
+            "eta_Total_Scale" : 0.1,
+            "eta_Total_Scaling":0.1,
+
+            "errNorm_sigma" : 2e3,
+            "Draws" : 50,
+            "Tune" : 50,
+            "Chains" : 1 ,
+            "Cores" : 1
+            },  
     }
   
 
@@ -1343,12 +1381,7 @@ if __name__ == "__main__":
 
         
 
-
-
-
-
 #Other Stuff
-
 # Creating Injector Array and Adding Mass Flow from Injector to global mdot array 
 '''
 Vinj = 0 # m/s speed of N2 being injected (alr converted to x direction)
@@ -1368,66 +1401,5 @@ inj_array[endInj+1:] = 2    #mark post injector locations +1 to start 1 after th
 
 mdot[startInj:endInj+1] = mdot_i + injMdot #add injector mass flow to main flow at injector location
 mdot[endInj+1:] = mdot_i + injMdot #post injector mass flow
-
-
-#setting up basic mcmc model for just the friction coeff 
-def log_prior(Cf):
-    if Cf < 0:
-        return -np.inf
-    else:
-        return stats.norm.logpdf(Cf, loc=0.005, scale=0.00125) 
-    
-def log_likelihood(Cf):
-    solve = consecutive_solves(Pstag_Air, Pstag_H2, uA, T_air, uB, T_H2, n_solves, Cf)
-    return np.sum(stats.norm.logpdf(imposed_Mdot, loc=solve["Choked Mdot"], scale=0.1*imposed_Mdot)) #likelihood function based on how close the choked mass flow from the solve is to the imposed mass flow, with a standard deviation of 10% of the imposed mass flow
-
-def log_posterior(Cf):
-    logPrior = log_prior(Cf)
-    if logPrior == -np.inf:
-        return -np.inf
-    logLikelihood = log_likelihood(Cf)
-    return logPrior + logLikelihood
-
-Cf_grid = np.linspace(0.003, 0.007, 100) #grid of friction coeffs to evaluate
-
-iters = 1000
-Cf_initial = 0.0025
-Cf_chain = np.zeros(iters)
-Cf_chain[0] = Cf_initial
-
-for i in range(1, iters):
-    Cf_current = Cf_chain[i-1]
-    Cf_guess = np.random.normal(Cf_current, 0.0005) #small random walk proposal distribution
-
-    log_posterior_current = log_posterior(Cf_current)
-    log_posterior_guess = log_posterior(Cf_guess)
-    acceptance_ratio = np.exp(log_posterior_guess - log_posterior_current)
-
-    if acceptance_ratio >= np.random.uniform(0, 1):
-        Cf_chain[i] = Cf_guess
-    else:
-        Cf_chain[i] = Cf_current
-
-log_posterior_values = [log_posterior(Cf) for Cf in Cf_grid]
-posterior_values = np.exp(log_posterior_values - np.max(log_posterior_values)) #subtracting max log posterior for numerical stability
-
-plt.figure()
-plt.plot(Cf_grid, posterior_values, 'o-')
-plt.xlabel("Friction Coefficient (Cf)")
-plt.ylabel("Log Posterior")
-plt.title("Log Posterior vs Friction Coefficient")
-plt.grid()
-
-plt.figure()
-plt.hist(Cf_chain, bins=50, density=True, alpha=0.6, label="MCMC samples")
-
-posterior_curve = np.exp(log_posterior_values - np.max(log_posterior_values))
-posterior_curve = posterior_curve / np.trapezoid(posterior_curve, Cf_grid)
-
-plt.plot(Cf_grid, posterior_curve, label="Posterior curve")
-plt.xlabel("Pipe Friction Factor (Cf)")
-plt.ylabel("Density")
-plt.legend()
-plt.show()
 
 '''
