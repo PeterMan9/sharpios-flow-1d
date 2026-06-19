@@ -20,4 +20,4 @@ def run_case(CaseName):
 if __name__ == "__main__":
 
     with ProcessPoolExecutor(max_workers=4) as executor:
-        executor.map(run_case,cases)
+        results = list(executor.map(run_case,cases))

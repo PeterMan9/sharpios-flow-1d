@@ -1220,7 +1220,7 @@ def run_MCMC_case(caseConfig):
 
         f.write("\nARVIZ Summary\n")
         f.write("---------------------\n")
-        f.write(f.write(summary.to_string()))
+        f.write(summary.to_string())
         f.write(f"\nParameter Results:\n")
 
         for param in summary.index:
@@ -1296,9 +1296,11 @@ def run_MCMC_case(caseConfig):
     plt.savefig(RunningMeanPlot_path,dpi=200)
     plt.close()
 
-    az.plot_pair(trace,var_names = ["Cf","eta_Total"],
-                 kinda = "kde",
-                 marginals = True)
+    az.plot_pair(trace,var_names = ["Cf","eta_Total"])
+    plt.tight_layout()
+    PairPlot_path = case_folder / f"PairPlot_{nameofCase}.png"
+    plt.savefig(PairPlot_path,dpi=200)
+    plt.close()
 
 #cases and running model 
 if __name__ == "__main__":
@@ -1319,15 +1321,14 @@ if __name__ == "__main__":
             "eta_Total_Prior_mu": 0.76,
             "eta_Total_Prior_sigma": (0.05 * 0.8),
             "eta_Total_Scale" : 0.1,
-            "eta_Total_Scaling":1,
+            "eta_Total_Scaling":0.1,
 
-            "errNorm_sigma" : 2e3,
-            "Draws" : 50,
-            "Tune" : 50,
-            "Chains" : 1 ,
-            "Cores" : 1
-            
-    },
+            "errNorm_sigma" : 1e5,
+            "Draws" : 500,
+            "Tune" : 500,
+            "Chains" : 4 ,
+            "Cores" : 4
+            },  
 
         "Case_2": {
             "Case_Name": "Case_2",
@@ -1342,14 +1343,14 @@ if __name__ == "__main__":
             "eta_Total_Prior_mu": 0.76,
             "eta_Total_Prior_sigma": (0.05 * 0.8),
             "eta_Total_Scale" : 0.1,
-            "eta_Total_Scaling":0.5,
+            "eta_Total_Scaling":0.25,
 
-            "errNorm_sigma" : 2e3,
-            "Draws" : 50,
-            "Tune" : 50,
-            "Chains" : 1 ,
-            "Cores" : 1
-        },
+            "errNorm_sigma" : 1e5,
+            "Draws" : 500,
+            "Tune" : 500,
+            "Chains" : 4 ,
+            "Cores" : 4
+            },  
 
         "Case_3": {
             "Case_Name": "Case_3",
@@ -1364,14 +1365,14 @@ if __name__ == "__main__":
             "eta_Total_Prior_mu": 0.76,
             "eta_Total_Prior_sigma": (0.05 * 0.8),
             "eta_Total_Scale" : 0.1,
-            "eta_Total_Scaling":0.1,
+            "eta_Total_Scaling":0.5,
 
-            "errNorm_sigma" : 2e3,
-            "Draws" : 50,
-            "Tune" : 50,
-            "Chains" : 1 ,
-            "Cores" : 1
-            },  
+            "errNorm_sigma" : 1e5,
+            "Draws" : 500,
+            "Tune" : 500,
+            "Chains" : 4 ,
+            "Cores" : 4
+        }
     }
   
 
