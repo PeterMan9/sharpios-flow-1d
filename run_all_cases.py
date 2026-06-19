@@ -4,8 +4,6 @@ import sys
 
 cases = [
     "Case_1",
-    "Case_2",
-    "Case_3"
 ]
 
 def run_case(CaseName):

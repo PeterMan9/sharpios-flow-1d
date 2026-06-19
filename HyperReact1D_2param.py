@@ -1244,62 +1244,80 @@ def run_MCMC_case(caseConfig):
         f.write(f"Chains = {set_chains}\n")
         f.write(f"Cores = {set_cores}\n")
 
+    param_labels = {
+            "Cf": "Friction Coefficient (Cf)",
+            "eta_Total": "Combustion Efficiency (\u03b7_Total)"
+        }
+    true_values = {
+            "Cf": set_True_Cf,
+            "eta_Total": set_True_eta_Total
+        }
+
     for param in summary.index:
-        # 1. trace plot
+        label = param_labels.get(param, param)
+        true_val = true_values.get(param)
+
         az.plot_trace(trace, var_names=[param])
-        plt.title("Trace Plot")
+        plt.suptitle(f"Trace Plot \u2014 {label} | {nameofCase}", fontsize=11, y=1.01)
         plt.tight_layout()
-        TracePlot_path = case_folder / f"{param}_{nameofCase}_Trace.png"
-        plt.savefig(TracePlot_path,dpi=200)
+        plt.savefig(case_folder / f"{param}_{nameofCase}_Trace.png", dpi=200)
         plt.close()
 
-        # 2. posterior plot with true value
         az.plot_dist(trace, var_names=[param])
-        plt.title("Posterior Plot")
+        if true_val is not None:
+            plt.axvline(true_val, color="red", linestyle="--", linewidth=1.5, label=f"True = {true_val}")
+            plt.legend(fontsize=9)
+        plt.xlabel(label, fontsize=10)
+        plt.ylabel("Density", fontsize=10)
+        plt.title(f"Posterior Distribution \u2014 {label} | {nameofCase}", fontsize=11)
         plt.tight_layout()
-        PosteriorPlot_path = case_folder / f"{param}_{nameofCase}_Posterior.png"
-        plt.savefig(PosteriorPlot_path,dpi=200)
+        plt.savefig(case_folder / f"{param}_{nameofCase}_Posterior.png", dpi=200)
         plt.close()
 
-        # 3. autocorrelation plot
         az.plot_autocorr(trace, var_names=[param])
-        plt.title("AutoCorrelationPlot")
+        plt.suptitle(f"Autocorrelation \u2014 {label} | {nameofCase}", fontsize=11, y=1.01)
         plt.tight_layout()
-        AutocorrPlot_path = case_folder / f"{param}_{nameofCase}_Autocorr.png"
-        plt.savefig(AutocorrPlot_path,dpi=200)
+        plt.savefig(case_folder / f"{param}_{nameofCase}_Autocorr.png", dpi=200)
         plt.close()
 
-    # 4. running mean plot
-    running_mean_cf = np.cumsum(cf_samples) / np.arange(1, len(cf_samples) + 1)    
-    plt.figure()
-    plt.plot(running_mean_cf)
-    plt.axhline(set_True_Cf, linestyle="--", label="True Cf")
-    plt.xlabel("Sample")
-    plt.ylabel("Running mean of Cf")
-    plt.legend()
-    plt.grid(True)
+    running_mean_cf = np.cumsum(cf_samples) / np.arange(1, len(cf_samples) + 1)
+    plt.figure(figsize=(8, 4))
+    plt.plot(running_mean_cf, color="steelblue", label="Running mean")
+    plt.axhline(set_True_Cf, color="red", linestyle="--", linewidth=1.5, label=f"True Cf = {set_True_Cf}")
+    plt.xlabel("Sample", fontsize=11)
+    plt.ylabel("Cf", fontsize=11)
+    plt.title(f"Running Mean \u2014 Friction Coefficient | {nameofCase}", fontsize=12)
+    plt.legend(fontsize=10)
+    plt.grid(True, alpha=0.4)
     plt.tight_layout()
-    RunningMeanPlot_path = case_folder / f"Cf_{nameofCase}_Running_mean.png"
-    plt.savefig(RunningMeanPlot_path,dpi=200)
+    plt.savefig(case_folder / f"Cf_{nameofCase}_Running_mean.png", dpi=200)
     plt.close()
 
-    running_mean_eta_Total = np.cumsum(eta_Total_samples) / np.arange(1, len(eta_Total_samples) + 1)    
-    plt.figure()
-    plt.plot(running_mean_eta_Total)
-    plt.axhline(set_True_eta_Total, linestyle="--", label="True Eta Total")
-    plt.xlabel("Sample")
-    plt.ylabel("Running mean of Eta Total")
-    plt.legend()
-    plt.grid(True)
+    running_mean_eta_Total = np.cumsum(eta_Total_samples) / np.arange(1, len(eta_Total_samples) + 1)
+    plt.figure(figsize=(8, 4))
+    plt.plot(running_mean_eta_Total, color="darkorange", label="Running mean")
+    plt.axhline(set_True_eta_Total, color="red", linestyle="--", linewidth=1.5, label=f"True \u03b7 ={set_True_eta_Total}")
+    plt.xlabel("Sample", fontsize=11)
+    plt.ylabel("\u03b7_Total", fontsize=11)
+    plt.title(f"Running Mean \u2014 Combustion Efficiency | {nameofCase}", fontsize=12)
+    plt.legend(fontsize=10)
+    plt.grid(True, alpha=0.4)
     plt.tight_layout()
-    RunningMeanPlot_path = case_folder / f"Eta_Total_{nameofCase}_Running_mean.png"
-    plt.savefig(RunningMeanPlot_path,dpi=200)
+    plt.savefig(case_folder / f"Eta_Total_{nameofCase}_Running_mean.png", dpi=200)
     plt.close()
 
-    az.plot_pair(trace,var_names = ["Cf","eta_Total"])
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.scatter(cf_samples, eta_Total_samples, alpha=0.3, s=5, color="steelblue", label="Posterior samples")
+    ax.axvline(set_True_Cf, color="red", linestyle="--", linewidth=1.5, label=f"True Cf = {set_True_Cf}")
+    ax.axhline(set_True_eta_Total, color="orange", linestyle="--", linewidth=1.5, label=f"True \u03b7 ={set_True_eta_Total}")
+    ax.scatter([set_True_Cf], [set_True_eta_Total], color="red", s=100, zorder=5, marker="*")
+    ax.set_xlabel("Friction Coefficient (Cf)", fontsize=12)
+    ax.set_ylabel("Combustion Efficiency (\u03b7_Total)", fontsize=12)
+    ax.set_title(f"Joint Posterior \u2014 {nameofCase}\nCorrelation: {corr:.3f}", fontsize=13)
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
     plt.tight_layout()
-    PairPlot_path = case_folder / f"PairPlot_{nameofCase}.png"
-    plt.savefig(PairPlot_path,dpi=200)
+    plt.savefig(case_folder / f"PairPlot_{nameofCase}.png", dpi=200)
     plt.close()
 
 #cases and running model 
@@ -1324,55 +1342,12 @@ if __name__ == "__main__":
             "eta_Total_Scaling":0.1,
 
             "errNorm_sigma" : 1e5,
-            "Draws" : 500,
-            "Tune" : 500,
-            "Chains" : 4 ,
-            "Cores" : 4
-            },  
+            "Draws" : 30000,
+            "Tune" : 2000,
+            "Chains" : 10 ,
+            "Cores" : 10
+            }
 
-        "Case_2": {
-            "Case_Name": "Case_2",
-            "Parameters": ["Cf", "eta_Total"],
-            "True_Cf": 0.005,
-            "Cf_Prior_mu" : 0.00475,
-            "Cf_Scale" : 0.001,
-            "Cf_Scaling" : 0.25,
-            "Cf_Prior_sigma" : (0.05 * 0.005),
-
-            "True_eta_Total" : 0.8,
-            "eta_Total_Prior_mu": 0.76,
-            "eta_Total_Prior_sigma": (0.05 * 0.8),
-            "eta_Total_Scale" : 0.1,
-            "eta_Total_Scaling":0.25,
-
-            "errNorm_sigma" : 1e5,
-            "Draws" : 500,
-            "Tune" : 500,
-            "Chains" : 4 ,
-            "Cores" : 4
-            },  
-
-        "Case_3": {
-            "Case_Name": "Case_3",
-            "Parameters": ["Cf", "eta_Total"],
-            "True_Cf": 0.005,
-            "Cf_Prior_mu" : 0.00475,
-            "Cf_Scale" : 0.001,
-            "Cf_Scaling" : 0.25,
-            "Cf_Prior_sigma" : (0.05 * 0.005),
-
-            "True_eta_Total" : 0.8,
-            "eta_Total_Prior_mu": 0.76,
-            "eta_Total_Prior_sigma": (0.05 * 0.8),
-            "eta_Total_Scale" : 0.1,
-            "eta_Total_Scaling":0.5,
-
-            "errNorm_sigma" : 1e5,
-            "Draws" : 500,
-            "Tune" : 500,
-            "Chains" : 4 ,
-            "Cores" : 4
-        }
     }
   
 

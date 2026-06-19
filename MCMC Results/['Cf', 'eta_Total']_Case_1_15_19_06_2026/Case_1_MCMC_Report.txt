@@ -14,25 +14,25 @@ Likelihood Sigma = 100000.0
 
 ARVIZ Summary
 ---------------------
-              mean       sd eti89_lb eti89_ub  ess_bulk  ess_tail r_hat mcse_mean  mcse_sd
-Cf         0.00476  0.00024   0.0044   0.0051       308       305  1.01   1.4e-05  9.5e-06
-eta_Total    0.798   0.0093     0.78     0.81       344       383  1.02    0.0005  0.00034
+             mean       sd eti89_lb eti89_ub  ess_bulk  ess_tail r_hat mcse_mean  mcse_sd
+Cf         0.0048  0.00023   0.0044   0.0052        19        11  1.15   5.2e-05  3.1e-05
+eta_Total     0.8     0.01     0.78     0.81        18        23  1.33    0.0022   0.0015
 Parameter Results:
 Cf
-Mean: 0.00476
-SD: 0.00024
-eti89_lb: 0.0044 eti89_ub: 0.0051
+Mean: 0.0048
+SD: 0.00023
+eti89_lb: 0.0044 eti89_ub: 0.0052
 eta_Total
-Mean: 0.798
-SD: 0.0093
+Mean: 0.8
+SD: 0.01
 eti89_lb: 0.78 eti89_ub: 0.81
 
 Other Results and metrics 
-Acceptance Rate: 0.308
-Cf-Eta Total, Correlation Coeff: -0.16604407187537015
+Acceptance Rate: 0.32
+Cf-Eta Total, Correlation Coeff: -0.2734314171461432
 
 Settings:
-Draws = 500
-Tune = 500
+Draws = 50
+Tune = 50
 Chains = 4
 Cores = 4
