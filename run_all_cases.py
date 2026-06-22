@@ -3,7 +3,9 @@ import subprocess
 import sys
 
 cases = [
-    "Case_1",
+    "Base_lambda",
+    "Low_lambda",
+    "High_Lamda",
 ]
 
 def run_case(CaseName):
@@ -17,5 +19,5 @@ def run_case(CaseName):
 
 if __name__ == "__main__":
 
-    with ProcessPoolExecutor(max_workers=4) as executor:
+    with ProcessPoolExecutor(max_workers=5) as executor:
         results = list(executor.map(run_case,cases))

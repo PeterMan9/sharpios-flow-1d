@@ -490,6 +490,9 @@ def rk45Step(V,P,Cf, h, x, T_preburner,eta_total): #add stages for each mdot 3
 
     h = min(h,h_max)
     while(accepted !=True):
+
+        if h < 1e-14:
+            raise RuntimeError(f"RK45 step size got too small at x = {x:.4f}")
         mdot_Current = mdotFuncX(x)
         mdot_Prev = mdotFuncX(x-h)
         x1 = x
@@ -1124,6 +1127,7 @@ def run_MCMC_case(caseConfig):
     set_eta_Total_scaling = caseConfig["eta_Total_Scaling"]
     errNorm_sigma = caseConfig["errNorm_sigma"]
 
+    set_lambda = caseConfig["lambda"]
     set_draws = caseConfig["Draws"]
     set_tune = caseConfig["Tune"]
     set_chains = caseConfig["Chains"]
@@ -1163,10 +1167,11 @@ def run_MCMC_case(caseConfig):
             pm.Potential("L1 Error Norm",log_like)
             
             step = pm.DEMetropolisZ(
+                lamb = set_lambda,
                 vars = [prior_Cf,prior_eta_Total],
                 S= np.array([set_Cf_scale,set_eta_Total_scale]), 
-                scaling = np.array([set_Cf_scaling,set_eta_Total_scaling]),  #Initial scale factor for how aggressive the sampler jumps and stuff
-                tune="scaling",
+                scaling = np.array([set_Cf_scaling,set_eta_Total_scaling]),  #Initial scale factor for how aggressive the sampler noise moves around 
+                tune="lamb",
                 tune_interval=100,
                 tune_drop_fraction=0.9
             )
@@ -1239,6 +1244,7 @@ def run_MCMC_case(caseConfig):
         f.write(f"Cf-Eta Total, Correlation Coeff: {corr}\n")
 
         f.write("\nSettings:\n")
+        f.write(f"Lambda = {set_lambda}\n")
         f.write(f"Draws = {set_draws}\n")
         f.write(f"Tune = {set_tune}\n")
         f.write(f"Chains = {set_chains}\n")
@@ -1267,6 +1273,7 @@ def run_MCMC_case(caseConfig):
         if true_val is not None:
             plt.axvline(true_val, color="red", linestyle="--", linewidth=1.5, label=f"True = {true_val}")
             plt.legend(fontsize=9)
+
         plt.xlabel(label, fontsize=10)
         plt.ylabel("Density", fontsize=10)
         plt.title(f"Posterior Distribution \u2014 {label} | {nameofCase}", fontsize=11)
@@ -1279,6 +1286,19 @@ def run_MCMC_case(caseConfig):
         plt.tight_layout()
         plt.savefig(case_folder / f"{param}_{nameofCase}_Autocorr.png", dpi=200)
         plt.close()
+
+        az.plot_ess(trace, var_names=[param])
+        plt.suptitle(f"ESS Plot \u2014 {label} | {nameofCase}", fontsize=11, y=1.01)
+        plt.tight_layout()
+        plt.savefig(case_folder / f"{param}_{nameofCase}_Ess.png", dpi=200)
+        plt.close()
+
+        az.plot_rank(trace, var_names=[param])
+        plt.suptitle(f"rank Plot \u2014 {label} | {nameofCase}", fontsize=11, y=1.01)
+        plt.tight_layout()
+        plt.savefig(case_folder / f"{param}_{nameofCase}_rank.png", dpi=200)
+        plt.close()
+
 
     running_mean_cf = np.cumsum(cf_samples) / np.arange(1, len(cf_samples) + 1)
     plt.figure(figsize=(8, 4))
@@ -1326,28 +1346,74 @@ if __name__ == "__main__":
     case_name = sys.argv[1]
 
     all_cases = {
-        "Case_1": {
-            "Case_Name": "Case_1",
+        "Base_lambda": {
+            "Case_Name": "Base_lambda",
             "Parameters": ["Cf", "eta_Total"],
             "True_Cf": 0.005,
             "Cf_Prior_mu" : 0.00475,
             "Cf_Scale" : 0.001,
-            "Cf_Scaling" : 0.25,
+            "Cf_Scaling" : 0.01,
             "Cf_Prior_sigma" : (0.05 * 0.005),
 
             "True_eta_Total" : 0.8,
             "eta_Total_Prior_mu": 0.76,
             "eta_Total_Prior_sigma": (0.05 * 0.8),
             "eta_Total_Scale" : 0.1,
-            "eta_Total_Scaling":0.1,
+            "eta_Total_Scaling":0.175,
 
             "errNorm_sigma" : 1e5,
-            "Draws" : 30000,
-            "Tune" : 2000,
-            "Chains" : 10 ,
-            "Cores" : 10
-            }
+            "lambda" : 1.19,
+            "Draws" : 500,
+            "Tune" : 500,
+            "Chains" : 5 ,
+            "Cores" : 5
+            },
 
+        "Low_lambda": {
+            "Case_Name": "Low_lambda",
+            "Parameters": ["Cf", "eta_Total"],
+            "True_Cf": 0.005,
+            "Cf_Prior_mu" : 0.00475,
+            "Cf_Scale" : 0.001,
+            "Cf_Scaling" : 0.01,
+            "Cf_Prior_sigma" : (0.05 * 0.005),
+
+            "True_eta_Total" : 0.8,
+            "eta_Total_Prior_mu": 0.76,
+            "eta_Total_Prior_sigma": (0.05 * 0.8),
+            "eta_Total_Scale" : 0.1,
+            "eta_Total_Scaling":0.175,
+
+            "errNorm_sigma" : 1e5,
+            "lambda" : 0.5,
+            "Draws" : 500,
+            "Tune" : 500,
+            "Chains" : 5 ,
+            "Cores" : 5
+            },
+
+        "High_Lamda": {
+            "Case_Name": "High_Lamda",
+            "Parameters": ["Cf", "eta_Total"],
+            "True_Cf": 0.005,
+            "Cf_Prior_mu" : 0.00475,
+            "Cf_Scale" : 0.001,
+            "Cf_Scaling" : 0.01,
+            "Cf_Prior_sigma" : (0.05 * 0.005),
+
+            "True_eta_Total" : 0.8,
+            "eta_Total_Prior_mu": 0.76,
+            "eta_Total_Prior_sigma": (0.05 * 0.8),
+            "eta_Total_Scale" : 0.1,
+            "eta_Total_Scaling":0.175,
+
+            "errNorm_sigma" : 1e5,
+            "lambda" : 1.5,
+            "Draws" : 500,
+            "Tune" : 500,
+            "Chains" : 5 ,
+            "Cores" : 5
+            },
     }
   
 

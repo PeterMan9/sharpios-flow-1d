@@ -1,0 +1,17 @@
+Case_Name: Case_1
+Parameters: ['Cf', 'eta_Total']
+True_Cf: 0.005
+Cf_Prior_mu: 0.00475
+Cf_Scale: 0.001
+Cf_Scaling: 0.25
+Cf_Prior_sigma: 0.00025
+True_eta_Total: 0.8
+eta_Total_Prior_mu: 0.76
+eta_Total_Prior_sigma: 0.04000000000000001
+eta_Total_Scale: 0.1
+eta_Total_Scaling: 0.1
+errNorm_sigma: 100000.0
+Draws: 30000
+Tune: 2000
+Chains: 10
+Cores: 10
