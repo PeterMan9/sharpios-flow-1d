@@ -1356,8 +1356,8 @@ if __name__ == "__main__":
 
     all_cases = {
         
-        "Base_LikelihoodSigma": {
-            "Case_Name": "Base_LikelihoodSigma",
+        "xReact_Base_Scaling": {
+            "Case_Name": "xReact_Base_Scaling",
             "Parameters": ["Cf", "eta_Total","x_react"],
 
             "True_Cf": 0.005,
@@ -1370,7 +1370,7 @@ if __name__ == "__main__":
             "eta_Total_Prior_mu": 0.76,
             "eta_Total_Prior_sigma": (0.05 * 0.8),
             "eta_Total_Scale" : 0.1,
-            "eta_Total_Scaling":0.2,
+            "eta_Total_Scaling":0.15,
 
             "True_x_react":0.01,
             "x_react_Prior_mu" : 0.0095,
@@ -1379,7 +1379,7 @@ if __name__ == "__main__":
             "x_react_Scaling" : 0.01,
 
 
-            "errNorm_sigma" : 1e5,
+            "errNorm_sigma" : 2e3,
             "lambda" : 1.19,
             "Draws" : 500,
             "Tune" : 500,
@@ -1387,8 +1387,71 @@ if __name__ == "__main__":
             "Cores" : 8
             },
 
-        "Mid_LikelihoodSigma": {
-            "Case_Name": "Mid_LikelihoodSigma",
+        "xReact_High_Scaling": {
+            "Case_Name": "xReact_High_Scaling",
+            "Parameters": ["Cf", "eta_Total","x_react"],
+
+            "True_Cf": 0.005,
+            "Cf_Prior_mu" : 0.00475,
+            "Cf_Scale" : 0.001,
+            "Cf_Scaling" : 0.1,
+            "Cf_Prior_sigma" : (0.05 * 0.005),
+
+            "True_eta_Total" : 0.8,
+            "eta_Total_Prior_mu": 0.76,
+            "eta_Total_Prior_sigma": (0.05 * 0.8),
+            "eta_Total_Scale" : 0.1,
+            "eta_Total_Scaling":0.15,
+
+            "True_x_react":0.01,
+            "x_react_Prior_mu" : 0.0095,
+            "x_react_Prior_sigma" : 0.01 * 0.05,
+            "x_react_Scale" : 0.01,
+            "x_react_Scaling" : 10,
+
+
+            "errNorm_sigma" : 2e3,
+            "lambda" : 1.19,
+            "Draws" : 500,
+            "Tune" : 500,
+            "Chains" : 8 ,
+            "Cores" : 8
+            },
+
+
+        "xReact_Mid_Scaling": {
+            "Case_Name": "xReact_Mid_Scaling",
+            "Parameters": ["Cf", "eta_Total","x_react"],
+
+            "True_Cf": 0.005,
+            "Cf_Prior_mu" : 0.00475,
+            "Cf_Scale" : 0.001,
+            "Cf_Scaling" : 0.1,
+            "Cf_Prior_sigma" : (0.05 * 0.005),
+
+            "True_eta_Total" : 0.8,
+            "eta_Total_Prior_mu": 0.76,
+            "eta_Total_Prior_sigma": (0.05 * 0.8),
+            "eta_Total_Scale" : 0.1,
+            "eta_Total_Scaling":0.15,
+
+            "True_x_react":0.01,
+            "x_react_Prior_mu" : 0.0095,
+            "x_react_Prior_sigma" : 0.01 * 0.05,
+            "x_react_Scale" : 0.01,
+            "x_react_Scaling" : 1,
+
+
+            "errNorm_sigma" : 2e3,
+            "lambda" : 1.19,
+            "Draws" : 500,
+            "Tune" : 500,
+            "Chains" : 8 ,
+            "Cores" : 8
+            },
+
+        "xReact_Low_Scaling": {
+            "Case_Name": "xReact_Low_Scaling",
             "Parameters": ["Cf", "eta_Total","x_react"],
 
             "True_Cf": 0.005,
@@ -1407,38 +1470,7 @@ if __name__ == "__main__":
             "x_react_Prior_mu" : 0.0095,
             "x_react_Prior_sigma" : 0.01 * 0.05,
             "x_react_Scale" : 0.01,
-            "x_react_Scaling" : 0.005,
-
-
-            "errNorm_sigma" : 1e4,
-            "lambda" : 1.19,
-            "Draws" : 500,
-            "Tune" : 500,
-            "Chains" : 8 ,
-            "Cores" : 8
-            },
-
-        "Low_LikelihoodSigma": {
-            "Case_Name": "Low_LikelihoodSigma",
-            "Parameters": ["Cf", "eta_Total","x_react"],
-
-            "True_Cf": 0.005,
-            "Cf_Prior_mu" : 0.00475,
-            "Cf_Scale" : 0.001,
-            "Cf_Scaling" : 0.1,
-            "Cf_Prior_sigma" : (0.05 * 0.005),
-
-            "True_eta_Total" : 0.8,
-            "eta_Total_Prior_mu": 0.76,
-            "eta_Total_Prior_sigma": (0.05 * 0.8),
-            "eta_Total_Scale" : 0.1,
-            "eta_Total_Scaling":0.2,
-
-            "True_x_react":0.01,
-            "x_react_Prior_mu" : 0.0095,
-            "x_react_Prior_sigma" : 0.01 * 0.05,
-            "x_react_Scale" : 0.01,
-            "x_react_Scaling" : 0.005,
+            "x_react_Scaling" : 0.1,
 
 
             "errNorm_sigma" : 2e3,
