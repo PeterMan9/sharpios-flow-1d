@@ -3,9 +3,9 @@ import subprocess
 import sys
 
 cases = [
-    "Base_LikelihoodSigma",
-    "Mid_LikelihoodSigma",
-    "Low_LikelihoodSigma"
+    "xReact_High_Scaling",
+    "xReact_Mid_Scaling",
+    "xReact_Low_Scaling"
 ]
 
 def run_case(CaseName):

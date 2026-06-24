@@ -1131,7 +1131,6 @@ def run_MCMC_case(caseConfig):
 
     errNorm_sigma = caseConfig["errNorm_sigma"]
 
-    set_lambda = caseConfig["lambda"]
     set_draws = caseConfig["Draws"]
     set_tune = caseConfig["Tune"]
     set_chains = caseConfig["Chains"]
@@ -1175,7 +1174,6 @@ def run_MCMC_case(caseConfig):
             pm.Potential("L1 Error Norm",log_like)
             
             step = pm.DEMetropolisZ(
-                lamb = set_lambda,
                 vars = [prior_Cf,prior_eta_Total,prior_x_react],
                 S= np.array([set_Cf_scale,set_eta_Total_scale,set_x_react_scale]), 
                 scaling = np.array([set_Cf_scaling,set_eta_Total_scaling,set_x_react_scaling]),  #Initial scale factor for how aggressive the sampler noise moves around 
@@ -1247,7 +1245,6 @@ def run_MCMC_case(caseConfig):
         f.write(f"Acceptance Rate: {acceptance_rate}\n")
 
         f.write("\nSettings:\n")
-        f.write(f"Lambda = {set_lambda}\n")
         f.write(f"Draws = {set_draws}\n")
         f.write(f"Tune = {set_tune}\n")
         f.write(f"Chains = {set_chains}\n")
@@ -1356,69 +1353,6 @@ if __name__ == "__main__":
 
     all_cases = {
         
-        "xReact_Base_Scaling": {
-            "Case_Name": "xReact_Base_Scaling",
-            "Parameters": ["Cf", "eta_Total","x_react"],
-
-            "True_Cf": 0.005,
-            "Cf_Prior_mu" : 0.00475,
-            "Cf_Scale" : 0.001,
-            "Cf_Scaling" : 0.5,
-            "Cf_Prior_sigma" : (0.05 * 0.005),
-
-            "True_eta_Total" : 0.8,
-            "eta_Total_Prior_mu": 0.76,
-            "eta_Total_Prior_sigma": (0.05 * 0.8),
-            "eta_Total_Scale" : 0.1,
-            "eta_Total_Scaling":0.15,
-
-            "True_x_react":0.01,
-            "x_react_Prior_mu" : 0.0095,
-            "x_react_Prior_sigma" : 0.01 * 0.05,
-            "x_react_Scale" : 0.01,
-            "x_react_Scaling" : 0.01,
-
-
-            "errNorm_sigma" : 2e3,
-            "lambda" : 1.19,
-            "Draws" : 500,
-            "Tune" : 500,
-            "Chains" : 8 ,
-            "Cores" : 8
-            },
-
-        "xReact_High_Scaling": {
-            "Case_Name": "xReact_High_Scaling",
-            "Parameters": ["Cf", "eta_Total","x_react"],
-
-            "True_Cf": 0.005,
-            "Cf_Prior_mu" : 0.00475,
-            "Cf_Scale" : 0.001,
-            "Cf_Scaling" : 0.1,
-            "Cf_Prior_sigma" : (0.05 * 0.005),
-
-            "True_eta_Total" : 0.8,
-            "eta_Total_Prior_mu": 0.76,
-            "eta_Total_Prior_sigma": (0.05 * 0.8),
-            "eta_Total_Scale" : 0.1,
-            "eta_Total_Scaling":0.15,
-
-            "True_x_react":0.01,
-            "x_react_Prior_mu" : 0.0095,
-            "x_react_Prior_sigma" : 0.01 * 0.05,
-            "x_react_Scale" : 0.01,
-            "x_react_Scaling" : 10,
-
-
-            "errNorm_sigma" : 2e3,
-            "lambda" : 1.19,
-            "Draws" : 500,
-            "Tune" : 500,
-            "Chains" : 8 ,
-            "Cores" : 8
-            },
-
-
         "xReact_Mid_Scaling": {
             "Case_Name": "xReact_Mid_Scaling",
             "Parameters": ["Cf", "eta_Total","x_react"],
@@ -1443,8 +1377,7 @@ if __name__ == "__main__":
 
 
             "errNorm_sigma" : 2e3,
-            "lambda" : 1.19,
-            "Draws" : 500,
+            "Draws" : 6500,
             "Tune" : 500,
             "Chains" : 8 ,
             "Cores" : 8
@@ -1470,12 +1403,11 @@ if __name__ == "__main__":
             "x_react_Prior_mu" : 0.0095,
             "x_react_Prior_sigma" : 0.01 * 0.05,
             "x_react_Scale" : 0.01,
-            "x_react_Scaling" : 0.1,
+            "x_react_Scaling" : 0.05,
 
 
             "errNorm_sigma" : 2e3,
-            "lambda" : 1.19,
-            "Draws" : 500,
+            "Draws" : 6500,
             "Tune" : 500,
             "Chains" : 8 ,
             "Cores" : 8
