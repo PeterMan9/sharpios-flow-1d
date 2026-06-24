@@ -1,0 +1,35 @@
+Parameters Included in Model = ['Cf', 'eta_Total', 'x_react']
+Base_Case Values 
+
+True CF = 0.005
+Cf Prior Mean = 0.00475
+Cf Prior Sigma = 0.00025
+Cf Scale = 0.001
+Cf Scaling = 0.005
+
+True Eta Total = 0.8
+Eta Total Prior Mean = 0.76
+Eta Total Prior Sigma = 0.04000000000000001
+Eta Total Scale = 0.1
+Eta Total Scaling = 0.001
+
+True x react = 0.01
+x react Prior Mean = 0.0095
+x react Prior Sigma = 0.0005
+x react Scale = 0.01
+x react Scaling = 0.005
+
+ARVIZ Summary
+---------------------
+              mean        sd eti89_lb eti89_ub  ess_bulk  ess_tail r_hat mcse_mean  mcse_sd
+Cf         0.00494  0.000138   0.0047   0.0051       490       642  1.02   6.2e-06  4.2e-06
+eta_Total      0.8     0.009     0.79     0.81       352       437  1.02   0.00048  0.00035
+x_react    0.00952   0.00051   0.0088     0.01       422       510  1.02   2.5e-05  1.9e-05
+Other Results and metrics 
+Acceptance Rate: 0.34125
+
+Settings:
+Draws = 500
+Tune = 500
+Chains = 8
+Cores = 8

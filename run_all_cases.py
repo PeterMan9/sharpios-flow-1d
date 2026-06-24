@@ -3,14 +3,13 @@ import subprocess
 import sys
 
 cases = [
-    "Base_Case",
-    "Low_LikelihoodVarCase"
+    "Case_1",
 ]
 
 def run_case(CaseName):
     run_cmd = [
         sys.executable,
-        "HyperReact1D_2param.py",
+        "HyperReact1D_Multiparam.py",
         CaseName
     ]
 

@@ -1070,12 +1070,11 @@ plt.show()
 
 #MCMC functions
 
-@as_op(itypes=[pt.dscalar,pt.dscalar,pt.dscalar,pt.dvector,pt.dscalar,pt.dscalar],otypes=[pt.dscalar]) 
-def log_likelihood(Cf,eta_total,x_react,true_PTPressure,true_errorNorm,errNorm_sigma):    
+@as_op(itypes=[pt.dscalar,pt.dscalar,pt.dscalar,pt.dvector],otypes=[pt.dscalar]) 
+def log_likelihood(Cf,eta_total,x_react,true_PTPressure):    
     Cf = float(Cf)
     eta_total = float(eta_total)
     x_react = float(x_react)
-    errNorm_sigma = float(errNorm_sigma)
 
     try:
         high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf,eta_total,x_react) #finding bracket 
@@ -1083,9 +1082,11 @@ def log_likelihood(Cf,eta_total,x_react,true_PTPressure,true_errorNorm,errNorm_s
         resultsAtCorrectScale = solver(TstagA,Cf,eta_total,x_react,final_scale,True,True) #getting exact values at correct scale 
         Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
 
-        Error_predicted = Predicted_PTPressure - true_PTPressure
-        error_norm = np.linalg.norm(Error_predicted, ord=1)
-        log_prob = stats.norm.logpdf(error_norm,loc = true_errorNorm,scale = errNorm_sigma)
+        predicted_error = Predicted_PTPressure - true_PTPressure
+        percent_uncertainty = 0.01 
+        sigma_i = np.sqrt((percent_uncertainty * true_PTPressure)**2) 
+
+        log_prob = np.sum(stats.norm.logpdf(predicted_error,loc = 0.0,scale = sigma_i))
 
         return np.array(log_prob, dtype=np.float64)
     
@@ -1102,10 +1103,7 @@ def generatingTrueValues(True_Cf,True_eta_total,x_react):
     resultsAtCorrectScale = solver(TstagA,True_Cf,True_eta_total,x_react,final_scale,True,True) #getting exact values at correct scale 
 
     true_PTPressure = resultsAtCorrectScale["PT_P"]
-    true_Error = resultsAtCorrectScale["PT_P"] - resultsAtCorrectScale["PT_P"]
-    true_errorNorm = np.linalg.norm(true_Error,ord = 1)
-
-    return true_PTPressure,true_errorNorm
+    return true_PTPressure
 
 #MCMC Model
 def run_MCMC_case(caseConfig):
@@ -1128,8 +1126,6 @@ def run_MCMC_case(caseConfig):
     set_x_react_Prior_sigma = caseConfig["x_react_Prior_sigma"]
     set_x_react_scale = caseConfig["x_react_Scale"]
     set_x_react_scaling = caseConfig["x_react_Scaling"]
-
-    errNorm_sigma = caseConfig["errNorm_sigma"]
 
     set_draws = caseConfig["Draws"]
     set_tune = caseConfig["Tune"]
@@ -1161,17 +1157,15 @@ def run_MCMC_case(caseConfig):
                     f.write(f"{key}: {value}\n")
 
 
-            true_PTPressure,true_errorNorm = generatingTrueValues(set_True_Cf,set_True_eta_Total,set_True_x_react)
+            true_PTPressure = generatingTrueValues(set_True_Cf,set_True_eta_Total,set_True_x_react)
             prior_Cf = pm.TruncatedNormal("Cf", mu=set_Cf_Prior_mu,  sigma=set_Cf_Prior_sigma,lower = 0,initval=set_Cf_Prior_mu,default_transform=None)
             prior_eta_Total = pm.TruncatedNormal("eta_Total", mu=set_eta_Total_Prior_mu, sigma = set_eta_Total_Prior_sigma, lower = 0, upper = 1, initval=set_eta_Total_Prior_mu, default_transform=None)
-            prior_x_react = pm.TruncatedNormal("x_react", mu=set_x_react_Prior_mu, sigma = set_x_react_Prior_sigma, lower = 0, upper = 0.02, initval=set_x_react_Prior_mu, default_transform=None)
+            prior_x_react = pm.TruncatedNormal("x_react", mu=set_x_react_Prior_mu, sigma = set_x_react_Prior_sigma, lower = 0, initval=set_x_react_Prior_mu, default_transform=None)
 
             log_like = log_likelihood(prior_Cf,prior_eta_Total,prior_x_react,
-                                            pt.as_tensor_variable(true_PTPressure, dtype="float64"),         
-                                            pt.as_tensor_variable(true_errorNorm, dtype="float64"),        
-                                            pt.as_tensor_variable(errNorm_sigma, dtype="float64")  )
+                                      pt.as_tensor_variable(true_PTPressure, dtype="float64"))
 
-            pm.Potential("L1 Error Norm",log_like)
+            pm.Potential("Error Likelihood",log_like)
             
             step = pm.DEMetropolisZ(
                 vars = [prior_Cf,prior_eta_Total,prior_x_react],
@@ -1234,9 +1228,6 @@ def run_MCMC_case(caseConfig):
         f.write(f"x react Scale = {set_x_react_scale}\n")
         f.write(f"x react Scaling = {set_x_react_scaling}\n")
         
-        f.write(f"\nLikelihood Mean = {true_errorNorm}\n")
-        f.write(f"Likelihood Sigma = {errNorm_sigma}\n")
-
         f.write("\nARVIZ Summary\n")
         f.write("---------------------\n")
         f.write(summary.to_string())
@@ -1353,65 +1344,35 @@ if __name__ == "__main__":
 
     all_cases = {
         
-        "Base_Case": {
-            "Case_Name": "Base_Case",
+        "Case_1": {
+            "Case_Name": "Case_1",
             "Parameters": ["Cf", "eta_Total","x_react"],
 
             "True_Cf": 0.005,
             "Cf_Prior_mu" : 0.00475,
             "Cf_Scale" : 0.001,
-            "Cf_Scaling" : 0.1,
+            "Cf_Scaling" : 0.05,
             "Cf_Prior_sigma" : (0.05 * 0.005),
 
             "True_eta_Total" : 0.8,
             "eta_Total_Prior_mu": 0.76,
             "eta_Total_Prior_sigma": (0.05 * 0.8),
             "eta_Total_Scale" : 0.1,
-            "eta_Total_Scaling":0.15,
+            "eta_Total_Scaling":0.001,
 
             "True_x_react":0.01,
             "x_react_Prior_mu" : 0.0095,
             "x_react_Prior_sigma" : 0.01 * 0.05,
             "x_react_Scale" : 0.01,
-            "x_react_Scaling" : 0.005,
+            "x_react_Scaling" : 0.05,
 
-
-            "errNorm_sigma" : 2e3,
-            "Draws" : 500,
+            "Draws" : 6500,
             "Tune" : 500,
             "Chains" : 8 ,
             "Cores" : 8
             },
 
-        "Low_LikelihoodVarCase": {
-            "Case_Name": "Low_LikelihoodVarCase",
-            "Parameters": ["Cf", "eta_Total","x_react"],
-
-            "True_Cf": 0.005,
-            "Cf_Prior_mu" : 0.00475,
-            "Cf_Scale" : 0.001,
-            "Cf_Scaling" : 0.1,
-            "Cf_Prior_sigma" : (0.05 * 0.005),
-
-            "True_eta_Total" : 0.8,
-            "eta_Total_Prior_mu": 0.76,
-            "eta_Total_Prior_sigma": (0.05 * 0.8),
-            "eta_Total_Scale" : 0.1,
-            "eta_Total_Scaling":0.15,
-
-            "True_x_react":0.01,
-            "x_react_Prior_mu" : 0.0095,
-            "x_react_Prior_sigma" : 0.01 * 0.05,
-            "x_react_Scale" : 0.01,
-            "x_react_Scaling" : 0.005,
-
-            "errNorm_sigma" : 1e3,
-            "Draws" : 500,
-            "Tune" : 500,
-            "Chains" : 8 ,
-            "Cores" : 8
-            }
-
+    
     }
   
 

@@ -10,7 +10,6 @@ dependencies:
   - mpi4py
   - pymc>=5
   - pip
-  - gxx
   #- pip:
     #- rtrea
     #- pymsis
