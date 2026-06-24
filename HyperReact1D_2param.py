@@ -1353,8 +1353,8 @@ if __name__ == "__main__":
 
     all_cases = {
         
-        "xReact_Mid_Scaling": {
-            "Case_Name": "xReact_Mid_Scaling",
+        "Base_Case": {
+            "Case_Name": "Base_Case",
             "Parameters": ["Cf", "eta_Total","x_react"],
 
             "True_Cf": 0.005,
@@ -1373,18 +1373,18 @@ if __name__ == "__main__":
             "x_react_Prior_mu" : 0.0095,
             "x_react_Prior_sigma" : 0.01 * 0.05,
             "x_react_Scale" : 0.01,
-            "x_react_Scaling" : 1,
+            "x_react_Scaling" : 0.005,
 
 
             "errNorm_sigma" : 2e3,
-            "Draws" : 6500,
+            "Draws" : 500,
             "Tune" : 500,
             "Chains" : 8 ,
             "Cores" : 8
             },
 
-        "xReact_Low_Scaling": {
-            "Case_Name": "xReact_Low_Scaling",
+        "Low_LikelihoodVarCase": {
+            "Case_Name": "Low_LikelihoodVarCase",
             "Parameters": ["Cf", "eta_Total","x_react"],
 
             "True_Cf": 0.005,
@@ -1397,17 +1397,16 @@ if __name__ == "__main__":
             "eta_Total_Prior_mu": 0.76,
             "eta_Total_Prior_sigma": (0.05 * 0.8),
             "eta_Total_Scale" : 0.1,
-            "eta_Total_Scaling":0.2,
+            "eta_Total_Scaling":0.15,
 
             "True_x_react":0.01,
             "x_react_Prior_mu" : 0.0095,
             "x_react_Prior_sigma" : 0.01 * 0.05,
             "x_react_Scale" : 0.01,
-            "x_react_Scaling" : 0.05,
+            "x_react_Scaling" : 0.005,
 
-
-            "errNorm_sigma" : 2e3,
-            "Draws" : 6500,
+            "errNorm_sigma" : 1e3,
+            "Draws" : 500,
             "Tune" : 500,
             "Chains" : 8 ,
             "Cores" : 8

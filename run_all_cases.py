@@ -3,9 +3,8 @@ import subprocess
 import sys
 
 cases = [
-    "xReact_High_Scaling",
-    "xReact_Mid_Scaling",
-    "xReact_Low_Scaling"
+    "Base_Case",
+    "Low_LikelihoodVarCase"
 ]
 
 def run_case(CaseName):
