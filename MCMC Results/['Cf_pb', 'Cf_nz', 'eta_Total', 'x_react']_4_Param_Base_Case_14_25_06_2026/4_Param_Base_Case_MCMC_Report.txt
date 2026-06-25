@@ -9,7 +9,7 @@ Preburner Cf Scaling = 0.001
 
 True Nozzle Cf = 0.008
 Nozzle Cf Prior Mean = 0.0076
-Nozzle Cf Prior Sigma = 4e-05
+Nozzle Cf Prior Sigma = 0.0004
 Nozzle Cf Scale = 0.001
 Nozzle Cf Scaling = 0.001
 
@@ -27,16 +27,16 @@ x react Scaling = 0.001
 
 ARVIZ Summary
 ---------------------
-               mean     sd eti89_lb eti89_ub  ess_bulk  ess_tail r_hat mcse_mean  mcse_sd
-Cf_pb       0.00192  9e-05   0.0018   0.0021       104        96  1.09   9.2e-06  6.3e-06
-Cf_nz      0.007617  4e-05   0.0076   0.0077       264       543  1.04   2.6e-06  1.7e-06
-eta_Total     0.788  0.024     0.76     0.83        30        52  1.24    0.0043   0.0033
-x_react       0.205  0.007     0.19     0.21        37        85  1.19    0.0011  0.00086
+              mean        sd eti89_lb eti89_ub  ess_bulk  ess_tail r_hat mcse_mean  mcse_sd
+Cf_pb       0.0019  0.000101   0.0017   0.0021      1515      2118  1.01   2.6e-06  1.8e-06
+Cf_nz      0.00792   0.00019   0.0076   0.0082       488       373  1.02   8.6e-06  6.3e-06
+eta_Total    0.803     0.026     0.76     0.84      1084      1598  1.01   0.00079  0.00059
+x_react     0.1993    0.0072     0.19     0.21      1151      1534  1.01   0.00021  0.00016
 Other Results and metrics 
-Acceptance Rate: 0.4282
+Acceptance Rate: 0.3238
 
 Settings:
-Draws = 500
-Tune = 250
+Draws = 2000
+Tune = 500
 Chains = 10
 Cores = 10

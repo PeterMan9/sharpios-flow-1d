@@ -7,7 +7,7 @@ Cf_pb_Scale: 0.001
 Cf_pb_Scaling: 0.001
 True_Cf_nz: 0.008
 Cf_nz_Prior_mu: 0.0076
-Cf_nz_Prior_sigma: 4e-05
+Cf_nz_Prior_sigma: 0.0004
 Cf_nz_Scale: 0.001
 Cf_nz_Scaling: 0.001
 True_eta_Total: 0.8
@@ -20,7 +20,7 @@ x_react_Prior_mu: 0.19
 x_react_Prior_sigma: 0.010000000000000002
 x_react_Scale: 0.1
 x_react_Scaling: 0.001
-Draws: 500
-Tune: 250
+Draws: 2000
+Tune: 500
 Chains: 10
 Cores: 10

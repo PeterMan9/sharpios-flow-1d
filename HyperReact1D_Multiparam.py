@@ -96,6 +96,7 @@ def pressureTap(x_old, p_old, x_new, p_new, PT_locations):
     
 def cf_location(x,Cf_pb, Cf_nz):
     region = geometry_regions(x)
+
     if region == "Preburner" or region == "Test Section":
         return Cf_pb
     
@@ -487,7 +488,6 @@ def newtonRaphson_P(P_guess, Pstag, T, gamma):
 def rk45Step(V,P,Cf_pb,Cf_nz, h, x, T_preburner,eta_total,x_react): #add stages for each mdot 3
     accepted = False 
     location = geometry_regions(x)
-    Cf = cf_location(x,Cf_pb,Cf_nz)
 
     if location == "Preburner":
         local_tol = 1e-2
@@ -1075,11 +1075,12 @@ def generatingTrueValues(True_Cf_pb,True_Cf_nz,True_eta_total,True_x_react):
     true_PTPressure = resultsAtCorrectScale["PT_P"]
     return true_PTPressure
 
+
 def likelihoodPlotting(frozenVar1, frozenVar2, frozenVar3, MovingVar):
 
     logplist = []
     count = 0 
-    Cf_pb = frozenVar1
+    Cf_nz = frozenVar1
     eta_total = frozenVar2
     x_react = frozenVar3
     
@@ -1099,9 +1100,9 @@ def likelihoodPlotting(frozenVar1, frozenVar2, frozenVar3, MovingVar):
         try:
             count+=1
 
-            high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf_pb,movingVariable,eta_total,x_react) #finding bracket 
-            final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_pb,movingVariable,eta_total,x_react)   # finding exact scale 
-            resultsAtCorrectScale = solver(TstagA,Cf_pb,movingVariable,eta_total,x_react,final_scale,True,True) #getting exact values at correct scale 
+            high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(movingVariable,Cf_nz,eta_total,x_react) #finding bracket 
+            final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,movingVariable,Cf_nz,eta_total,x_react)   # finding exact scale 
+            resultsAtCorrectScale = solver(TstagA,movingVariable,Cf_nz,eta_total,x_react,final_scale,True,True) #getting exact values at correct scale 
             Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
 
             predicted_error = Predicted_PTPressure - true_PTPressure
@@ -1126,10 +1127,6 @@ def likelihoodPlotting(frozenVar1, frozenVar2, frozenVar3, MovingVar):
     plt.ylabel("Log Likelihood")
     plt.grid()
     plt.show()
-
-if __name__ == "__main__":
-
-    results = likelihoodPlotting(0.002,  0.8,0.005, 0.2)
 
 
 #MCMC Model
@@ -1296,7 +1293,7 @@ def run_MCMC_case(caseConfig):
             "Cf_pb": set_True_Cf_pb,
             "Cf_nz": set_True_Cf_nz,
             "eta_Total": set_True_eta_Total,
-            "x_react" : set_x_react_scale
+            "x_react" : set_True_x_react
         }
 
     for param in summary.index:
@@ -1397,7 +1394,7 @@ def run_MCMC_case(caseConfig):
 
 #cases and running model 
 if __name__ == "__main__":
-    '''
+   
     case_name = sys.argv[1]
 
     all_cases = {
@@ -1414,7 +1411,7 @@ if __name__ == "__main__":
 
             "True_Cf_nz": 0.008,
             "Cf_nz_Prior_mu" : 0.0076,
-            "Cf_nz_Prior_sigma" : (0.008 * 0.005),
+            "Cf_nz_Prior_sigma" : (0.008 * 0.05),
             "Cf_nz_Scale" : 0.001,
             "Cf_nz_Scaling" : 0.001,
 
@@ -1430,8 +1427,8 @@ if __name__ == "__main__":
             "x_react_Scale" : 0.1,
             "x_react_Scaling" : 0.001,
 
-            "Draws" : 500,
-            "Tune" : 250,
+            "Draws" : 2000,
+            "Tune" : 500,
             "Chains" : 10 ,
             "Cores" : 10
             },
@@ -1443,4 +1440,3 @@ if __name__ == "__main__":
 
     run_MCMC_case(case)
 
-'''
