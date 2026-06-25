@@ -1,0 +1,42 @@
+Parameters Included in Model = ['Cf_pb', 'Cf_nz', 'eta_Total', 'x_react']
+4_Param_Initial_Test Values 
+
+True Preburner Cf = 0.005
+Preburner Cf Prior Mean = 0.00475
+Preburner Cf Prior Sigma = 0.00025
+Preburner Cf Scale = 0.001
+Preburner Cf Scaling = 0.005
+
+True Nozzle Cf = 0.008
+Nozzle Cf Prior Mean = 0.0076
+Nozzle Cf Prior Sigma = 4e-05
+Nozzle Cf Scale = 0.001
+Nozzle Cf Scaling = 0.005
+
+True Eta Total = 0.8
+Eta Total Prior Mean = 0.76
+Eta Total Prior Sigma = 0.04000000000000001
+Eta Total Scale = 0.1
+Eta Total Scaling = 0.001
+
+True x react = 0.2
+x react Prior Mean = 0.19
+x react Prior Sigma = 0.010000000000000002
+x react Scale = 0.1
+x react Scaling = 0.001
+
+ARVIZ Summary
+---------------------
+               mean       sd eti89_lb eti89_ub  ess_bulk  ess_tail r_hat mcse_mean  mcse_sd
+Cf_pb       0.00477  0.00025   0.0044   0.0051        44        87  1.12   3.7e-05  2.6e-05
+Cf_nz      0.007616  3.9e-05   0.0076   0.0077       386       542  1.01     2e-06  1.5e-06
+eta_Total      0.79    0.031     0.74     0.84        18        18  1.37    0.0073   0.0044
+x_react       0.204    0.008     0.19     0.22        20        23  1.33    0.0019   0.0012
+Other Results and metrics 
+Acceptance Rate: 0.3835
+
+Settings:
+Draws = 500
+Tune = 500
+Chains = 8
+Cores = 8

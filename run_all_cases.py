@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 cases = [
-    "3_Param_Converged_LongRun"
+    "4_Param_Initial_Test"
 ]
 
 def run_case(CaseName):
