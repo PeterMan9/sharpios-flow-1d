@@ -1007,59 +1007,6 @@ plt.show()
 '''
 
 
-'''
-Cf_grid = np.linspace(True_Cf - 0.002, True_Cf+0.002, 50)
-logplist = []
-errNorm = []
-count = 0 
-
-
-for Cf_try in Cf_grid:
-
-
-    try:
-        count+=1 
-        high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf_try) #finding bracket 
-        final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_try)   # finding exact scale 
-        resultsAtCorrectScale = solver(TstagA,Cf_try,final_scale,True,True) #getting exact values at correct scale 
-
-        Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
-
-        Error_predicted = Predicted_PTPressure - true_PTPressure
-
-        error_norm = np.linalg.norm(Error_predicted, ord=1)
-
-        logp = stats.norm.logpdf(error_norm, loc = true_errorNorm, scale = errNorm_sigma)
-
-        errNorm.append(error_norm)
-        logplist.append(logp)
-        print(count)
-    except Exception as Cf_Fail:
-        print(f"Failed because of: {Cf_Fail}")
-
-
-logp_array = np.array(logplist)
-Cf_list = Cf_grid[:len(logp_array)]
-errNorm_array = np.array(errNorm)
-plt.figure()
-plt.plot(Cf_list,errNorm_array, label = "err norms")
-plt.axhline(y=true_errorNorm, color='red', label = "true error norm ")
-plt.xlabel("Cf Values")
-plt.ylabel("Nrom Error")
-plt.legend()
-plt.grid()
-
-
-plt.figure()
-plt.plot(Cf_list,logp_array)
-plt.xlabel("Cf Values")
-plt.ylabel("Log Likelihood")
-plt.grid()
-plt.show()
-
-'''
-
-
 
 #MCMC set up
 #using black box approach 
@@ -1096,14 +1043,64 @@ def log_likelihood(Cf,eta_total,x_react,true_PTPressure):
             return np.array(-1.0e10, dtype=np.float64)
     
 
-def generatingTrueValues(True_Cf,True_eta_total,x_react):
+def generatingTrueValues(True_Cf,True_eta_total,True_x_react):
 
-    high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf,True_eta_total,x_react) #finding bracket 
-    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf,True_eta_total,x_react)   # finding exact scale 
-    resultsAtCorrectScale = solver(TstagA,True_Cf,True_eta_total,x_react,final_scale,True,True) #getting exact values at correct scale 
+    high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf,True_eta_total,True_x_react) #finding bracket 
+    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf,True_eta_total,True_x_react)   # finding exact scale 
+    resultsAtCorrectScale = solver(TstagA,True_Cf,True_eta_total,True_x_react,final_scale,True,True) #getting exact values at correct scale 
 
     true_PTPressure = resultsAtCorrectScale["PT_P"]
     return true_PTPressure
+
+
+
+def likelihoodPlotting(frozenVar1, frozenVar2, MovingVar):
+
+    logplist = []
+    count = 0 
+    #case 1 
+    eta_total = frozenVar1
+    Cf = frozenVar2
+    movingVar_grid = np.linspace(MovingVar - MovingVar * 0.05, MovingVar + MovingVar * 0.05, 50)
+
+    True_Cf = 0.005
+    True_eta_Total = 0.8
+    True_x_react = 0.2
+
+    true_PTPressure = generatingTrueValues(True_Cf,True_eta_Total,True_x_react)
+    count = 0
+    for movingVariable in movingVar_grid:
+
+        try:
+            count+=1
+
+            high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf,eta_total,movingVariable) #finding bracket 
+            final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf,eta_total,movingVariable)   # finding exact scale 
+            resultsAtCorrectScale = solver(TstagA,Cf,eta_total,movingVariable,final_scale,True,True) #getting exact values at correct scale 
+            Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
+
+            predicted_error = Predicted_PTPressure - true_PTPressure
+            percent_uncertainty = 0.01 
+            sigma_i = np.sqrt((percent_uncertainty * true_PTPressure)**2) 
+
+            log_prob = np.sum(stats.norm.logpdf(predicted_error,loc = 0.0,scale = sigma_i))
+            print(count)
+            logplist.append(log_prob)
+        
+        except Exception as e:
+                print(f"Failed because of: {e}")
+        
+
+
+    logp_array = np.array(logplist)
+    movingVar_list = movingVar_grid[:len(logp_array)]
+    
+    plt.figure()
+    plt.plot(movingVar_list,logp_array)
+    plt.xlabel("Values")
+    plt.ylabel("Log Likelihood")
+    plt.grid()
+    plt.show()
 
 #MCMC Model
 def run_MCMC_case(caseConfig):
@@ -1339,19 +1336,19 @@ def run_MCMC_case(caseConfig):
 
 #cases and running model 
 if __name__ == "__main__":
-
+    
     case_name = sys.argv[1]
 
     all_cases = {
         
-        "Case_1": {
-            "Case_Name": "Case_1",
+        "3_Param_Converged_LongRun": {
+            "Case_Name": "3_Param_Converged_LongRun",
             "Parameters": ["Cf", "eta_Total","x_react"],
 
             "True_Cf": 0.005,
             "Cf_Prior_mu" : 0.00475,
             "Cf_Scale" : 0.001,
-            "Cf_Scaling" : 0.05,
+            "Cf_Scaling" : 0.005,
             "Cf_Prior_sigma" : (0.05 * 0.005),
 
             "True_eta_Total" : 0.8,
@@ -1360,13 +1357,13 @@ if __name__ == "__main__":
             "eta_Total_Scale" : 0.1,
             "eta_Total_Scaling":0.001,
 
-            "True_x_react":0.01,
-            "x_react_Prior_mu" : 0.0095,
-            "x_react_Prior_sigma" : 0.01 * 0.05,
-            "x_react_Scale" : 0.01,
-            "x_react_Scaling" : 0.05,
+            "True_x_react":0.2,
+            "x_react_Prior_mu" : 0.19,
+            "x_react_Prior_sigma" : 0.2 * 0.05,
+            "x_react_Scale" : 0.1,
+            "x_react_Scaling" : 0.001,
 
-            "Draws" : 6500,
+            "Draws" : 2000,
             "Tune" : 500,
             "Chains" : 8 ,
             "Cores" : 8
@@ -1379,3 +1376,4 @@ if __name__ == "__main__":
     case = all_cases[case_name]
 
     run_MCMC_case(case)
+
