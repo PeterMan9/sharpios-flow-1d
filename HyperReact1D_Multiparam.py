@@ -1075,6 +1075,61 @@ def generatingTrueValues(True_Cf_pb,True_Cf_nz,True_eta_total,True_x_react):
     true_PTPressure = resultsAtCorrectScale["PT_P"]
     return true_PTPressure
 
+def likelihoodPlotting(frozenVar1, frozenVar2, frozenVar3, MovingVar):
+
+    logplist = []
+    count = 0 
+    Cf_pb = frozenVar1
+    eta_total = frozenVar2
+    x_react = frozenVar3
+    
+    movingVar_grid = np.linspace(MovingVar - MovingVar * 0.2, MovingVar + MovingVar * 0.2, 50)
+
+    True_Cf_pb = 0.002
+    True_Cf_nz = 0.005
+    True_eta_Total = 0.8
+    True_x_react = 0.2
+
+    true_PTPressure = generatingTrueValues(True_Cf_pb,True_Cf_nz, True_eta_Total,True_x_react)
+
+    count = 0
+
+    for movingVariable in movingVar_grid:
+
+        try:
+            count+=1
+
+            high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf_pb,movingVariable,eta_total,x_react) #finding bracket 
+            final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_pb,movingVariable,eta_total,x_react)   # finding exact scale 
+            resultsAtCorrectScale = solver(TstagA,Cf_pb,movingVariable,eta_total,x_react,final_scale,True,True) #getting exact values at correct scale 
+            Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
+
+            predicted_error = Predicted_PTPressure - true_PTPressure
+            percent_uncertainty = 0.01 
+            sigma_i = np.sqrt((percent_uncertainty * true_PTPressure)**2) 
+
+            log_prob = np.sum(stats.norm.logpdf(predicted_error,loc = 0.0,scale = sigma_i))
+            print(count)
+            logplist.append(log_prob)
+        
+        except Exception as e:
+                print(f"Failed because of: {e}")
+        
+
+
+    logp_array = np.array(logplist)
+    movingVar_list = movingVar_grid[:len(logp_array)]
+    
+    plt.figure()
+    plt.plot(movingVar_list,logp_array)
+    plt.xlabel("Values")
+    plt.ylabel("Log Likelihood")
+    plt.grid()
+    plt.show()
+
+if __name__ == "__main__":
+
+    results = likelihoodPlotting(0.002,  0.8,0.005, 0.2)
 
 
 #MCMC Model
@@ -1334,7 +1389,7 @@ def run_MCMC_case(caseConfig):
     plt.savefig(case_folder / f"Combined_Metrics_{nameofCase}_Running_mean.png", dpi=200, bbox_inches='tight')
     plt.close(fig)
 
-    az.plot_pair(trace,var_names= ["Cf","eta_Total","x_react"])
+    az.plot_pair(trace,var_names= ["Cf_pb","Cf_nz","eta_Total","x_react"])
     plt.suptitle("Joint Posterior", y = 1.02)
     plt.tight_layout()
     plt.savefig(case_folder / f"PairPlot_{nameofCase}.png", dpi=150, bbox_inches = "tight")
@@ -1342,26 +1397,26 @@ def run_MCMC_case(caseConfig):
 
 #cases and running model 
 if __name__ == "__main__":
-    
+    '''
     case_name = sys.argv[1]
 
     all_cases = {
         
-        "4_Param_Initial_Test": {
-            "Case_Name": "4_Param_Initial_Test",
+        "4_Param_Base_Case": {
+            "Case_Name": "4_Param_Base_Case",
             "Parameters": ["Cf_pb","Cf_nz", "eta_Total","x_react"],
 
-            "True_Cf_pb": 0.005,
-            "Cf_pb_Prior_mu" : 0.00475,
-            "Cf_pb_Prior_sigma" : (0.05 * 0.005),
+            "True_Cf_pb": 0.002,
+            "Cf_pb_Prior_mu" : 0.0019,
+            "Cf_pb_Prior_sigma" : (0.05 * 0.002),
             "Cf_pb_Scale" : 0.001,
-            "Cf_pb_Scaling" : 0.005,
+            "Cf_pb_Scaling" : 0.001,
 
             "True_Cf_nz": 0.008,
             "Cf_nz_Prior_mu" : 0.0076,
             "Cf_nz_Prior_sigma" : (0.008 * 0.005),
             "Cf_nz_Scale" : 0.001,
-            "Cf_nz_Scaling" : 0.005,
+            "Cf_nz_Scaling" : 0.001,
 
             "True_eta_Total" : 0.8,
             "eta_Total_Prior_mu": 0.76,
@@ -1376,11 +1431,10 @@ if __name__ == "__main__":
             "x_react_Scaling" : 0.001,
 
             "Draws" : 500,
-            "Tune" : 500,
-            "Chains" : 8 ,
-            "Cores" : 8
+            "Tune" : 250,
+            "Chains" : 10 ,
+            "Cores" : 10
             },
-
     
     }
   
@@ -1389,3 +1443,4 @@ if __name__ == "__main__":
 
     run_MCMC_case(case)
 
+'''

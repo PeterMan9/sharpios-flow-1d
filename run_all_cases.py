@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 cases = [
-    "4_Param_Initial_Test"
+    "4_Param_Base_Case",
 ]
 
 def run_case(CaseName):
