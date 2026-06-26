@@ -94,14 +94,17 @@ def pressureTap(x_old, p_old, x_new, p_new, PT_locations):
     
     return None,None
     
-def cf_location(x,Cf_pb, Cf_nz):
+def cf_location(x,Cf_dnz, Cf_cnz):
     region = geometry_regions(x)
-
-    if region == "Preburner" or region == "Test Section":
-        return Cf_pb
+    Cf_preburner = 0.0025
+    if region == "Preburner":
+        return Cf_preburner
     
-    elif region == "Throat" or region == "Conv Nozzle" or region == "Div Nozzle":
-        return Cf_nz
+    elif region == "Throat" or region == "Conv Nozzle":
+        return Cf_cnz
+    elif region == "Div Nozzle" or region == "Test Section":
+        return Cf_dnz    
+    
 
 def mNum(v,a): #mach number 
     M = v/a
@@ -144,34 +147,34 @@ hpr_h2 = 120e6 #J/kg
 fst = 0.029
 phi = 0.2306
 theta = 1
+x_react = 0.1
+def x_norm(x,combustion_end):
+    return (x - x_react)/(combustion_end - x_react)
 
-def x_norm(x,x_react):
-    return (x - x_react)/(preburner_length - x_react)
-
-def eta(x,eta_total,x_react):
-    eta = eta_total * (theta * x_norm(x,x_react)/(1 + (theta - 1) * x_norm(x,x_react)))
+def eta(x,eta_total,combustion_end):
+    eta = eta_total * (theta * x_norm(x,combustion_end)/(1 + (theta - 1) * x_norm(x,combustion_end)))
     return eta
 
-def dPHI(x,dx,eta_total,x_react):
+def dPHI(x,dx,eta_total,combustion_end):
     xcurrent = x
     xprev = x - dx
-    dPHI = phi * (eta(xcurrent,eta_total,x_react) - eta(xprev,eta_total,x_react))
+    dPHI = phi * (eta(xcurrent,eta_total,combustion_end) - eta(xprev,eta_total,combustion_end))
     return dPHI
 
-def dHtdx(x,dx,eta_total,x_react):
+def dHtdx(x,dx,eta_total,combustion_end):
     if x <= preburner_length:
-        return (dPHI(x,dx,eta_total,x_react) * hpr_h2 * fst)/dx
+        return (dPHI(x,dx,eta_total,combustion_end) * hpr_h2 * fst)/dx
     else:
         return 0
 
-def residualT(T_new,T_old,xOld,uOld,uNew,dx,eta_total,P,x_react):
+def residualT(T_new,T_old,xOld,uOld,uNew,dx,eta_total,P,combustion_end):
     T_gasProperties_old = gas_properties(T_old, P, Y_mix)
     T_gasProperties_new = gas_properties(T_new, P, Y_mix)
     ht_old = T_gasProperties_old["h"]
     ht_new = T_gasProperties_new["h"]
     term1 = (ht_new - ht_old)
     term2 = (uNew**2 - uOld**2)/2
-    term3 = dHtdx(xOld,dx,eta_total,x_react) * dx
+    term3 = dHtdx(xOld,dx,eta_total,combustion_end) * dx
     return term1 + term2 - term3
 
 #initial conditions
@@ -254,27 +257,27 @@ def mdotFuncX (x):
 
 
 #1st order ODE Functions
-def dVdX (V,A,M,T,P,mdot,dmdotDX, Cf, x,dx,eta_total,x_react): #first 4 parts of sharpios 1d flow eqn converted to dV/dx
+def dVdX (V,A,M,T,P,mdot,dmdotDX, Cf, x,dx,eta_total,combustion_end): #first 4 parts of sharpios 1d flow eqn converted to dV/dx
 
     gas_Prop = gas_properties(T, P, Y_mix)
     cp = gas_Prop["cp"]
     gamma = gas_Prop["gamma"]
 
     term1 = ((-V)/(A * (1 - M**2)))* dAdx(x)
-    term2 = ((V/((1-M**2) * cp * T)) * dHtdx(x,dx,eta_total,x_react))
+    term2 = ((V/((1-M**2) * cp * T)) * dHtdx(x,dx,eta_total,combustion_end))
     term3 = ((gamma *M**2)/(2 * (1 - M**2)))
     term4 = ((((4 * Cf * V)/Dh(x))) - (2*(Vinj/mdot) * dmdotDX))
     term5 = (((V*(1 + gamma * M**2))/((1-M**2)*mdot)) * (dmdotDX))
     return term1 + term2 + (term3*term4) + term5
 
-def dPdX (V,A,M,T,P,mdot,dmdotDX, Cf, x,dx,eta_total,x_react): #first 4 parts of sharpios 1d flow eqn converted to dP/dx
+def dPdX (V,A,M,T,P,mdot,dmdotDX, Cf, x,dx,eta_total,combustion_end): #first 4 parts of sharpios 1d flow eqn converted to dP/dx
     gas_Prop = gas_properties(T, P, Y_mix)
     cp = gas_Prop["cp"]
     gamma = gas_Prop["gamma"]
 
 
     term1 = ((gamma * M**2 * P)/(A * (1 - M**2))) * dAdx(x)
-    term2 = -(((gamma * M**2 * P)/((1-M**2) * cp * T)) * dHtdx(x,dx,eta_total,x_react))
+    term2 = -(((gamma * M**2 * P)/((1-M**2) * cp * T)) * dHtdx(x,dx,eta_total,combustion_end))
     term3  = -((gamma * M**2 * (1 + (gamma-1) * M**2))/(2 * (1 - M**2)))
     term4 = (((4 * Cf * (P/Dh(x)))) - (2 * ((Vinj * P)/(mdot * V)) * (dmdotDX)))
     term5 = -(((2 * gamma * M**2 * (1 + ((gamma-1)/2) *M**2)*P)/((1-M**2)*mdot)) * (dmdotDX))
@@ -396,14 +399,14 @@ def CV_toPreburner(u2,T2,uA,uB,TA,TB): #this is newton raphson for the CV it goe
 
     return u2, T2
 
-def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx,eta_total,P,x_react):
+def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx,eta_total,P,combustion_end):
     numIters = 0
     tol = 1e-8
-    E = residualT(T_Guess, T_old, xOld, uOld, uNew, dx,eta_total,P,x_react)
+    E = residualT(T_Guess, T_old, xOld, uOld, uNew, dx,eta_total,P,combustion_end)
 
     while abs(E) >= tol and numIters <= 100:
         deltaT = max(abs(T_Guess)*1e-6, 1e-6)
-        dEdT = (residualT(T_Guess + deltaT, T_old, xOld, uOld, uNew, dx,eta_total,P,x_react) - E)/deltaT
+        dEdT = (residualT(T_Guess + deltaT, T_old, xOld, uOld, uNew, dx,eta_total,P,combustion_end) - E)/deltaT
 
         if not np.isfinite(dEdT) or abs(dEdT) < 1e-14:
             raise RuntimeError("Bad temperature Newton derivative")
@@ -418,7 +421,7 @@ def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx,eta_total,P,x_react):
                 lamda *= 0.5
                 continue
 
-            E_new = residualT(T_new, T_old, xOld, uOld, uNew, dx,eta_total,P,x_react)
+            E_new = residualT(T_new, T_old, xOld, uOld, uNew, dx,eta_total,P,combustion_end)
 
             if np.isfinite(E_new) and abs(E_new) < abs(E):
                 accepted = True
@@ -485,7 +488,7 @@ def newtonRaphson_P(P_guess, Pstag, T, gamma):
 
 #rk45
 
-def rk45Step(V,P,Cf_pb,Cf_nz, h, x, T_preburner,eta_total,x_react): #add stages for each mdot 3
+def rk45Step(V,P,Cf_dnz, Cf_cnz, h, x, T_preburner,eta_total,combustion_end): #add stages for each mdot 3
     accepted = False 
     location = geometry_regions(x)
 
@@ -507,7 +510,7 @@ def rk45Step(V,P,Cf_pb,Cf_nz, h, x, T_preburner,eta_total,x_react): #add stages 
         mdot_Current = mdotFuncX(x)
         mdot_Prev = mdotFuncX(x-h)
         x1 = x
-        Cf1 = cf_location(x1,Cf_pb,Cf_nz)
+        Cf1 = cf_location(x1,Cf_dnz, Cf_cnz)
         A1 = geom_Area(x1)
         V1 = V
         P1 =  P
@@ -518,63 +521,63 @@ def rk45Step(V,P,Cf_pb,Cf_nz, h, x, T_preburner,eta_total,x_react): #add stages 
             h *= 0.5
             continue
         M1 = mNum(V1,a1)
-        k1V = h * dVdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf1,x1,h,eta_total,x_react)
-        k1P = h * dPdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf1,x1,h,eta_total,x_react)
+        k1V = h * dVdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf1,x1,h,eta_total,combustion_end)
+        k1P = h * dPdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf1,x1,h,eta_total,combustion_end)
 
         x2 = x1 + 1/5 * h
-        Cf2 = cf_location(x2,Cf_pb,Cf_nz)
+        Cf2 = cf_location(x2,Cf_dnz, Cf_cnz)
         A2 = geom_Area(x2)
         V2 = V + 1/5 * k1V 
         P2 = P + 1/5 * k1P
         try:
-            T2 = newtonRaphson_T(T1, T1, x1, V1, V2, 1/5 * h,eta_total,P2,x_react)
+            T2 = newtonRaphson_T(T1, T1, x1, V1, V2, 1/5 * h,eta_total,P2,combustion_end)
             a2 = soS(T2,R_mix,gas_properties(T2, P2, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue
         M2 = mNum(V2,a2)
-        k2V = h * dVdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,x_react)
-        k2P = h * dPdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,x_react)
+        k2V = h * dVdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,combustion_end)
+        k2P = h * dPdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,combustion_end)
 
         x3 = x1 + 3/10 * h
-        Cf3 = cf_location(x3,Cf_pb,Cf_nz)
+        Cf3 = cf_location(x3,Cf_dnz, Cf_cnz)
 
         A3 = geom_Area(x3)
         V3 = V + 3/40 * k1V + 9/40 * k2V
         P3 = P + 3/40 * k1P + 9/40 * k2P
         try:
-            T3 = newtonRaphson_T(T1, T1, x1, V1, V3, 3/10 * h,eta_total,P3,x_react) 
+            T3 = newtonRaphson_T(T1, T1, x1, V1, V3, 3/10 * h,eta_total,P3,combustion_end) 
             a3 = soS(T3,R_mix,gas_properties(T3, P3, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue
         M3 = mNum(V3,a3)
-        k3V = h * dVdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf3,x3,3/10 * h,eta_total,x_react)
-        k3P = h * dPdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf3,x3,3/10 * h,eta_total,x_react)
+        k3V = h * dVdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf3,x3,3/10 * h,eta_total,combustion_end)
+        k3P = h * dPdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf3,x3,3/10 * h,eta_total,combustion_end)
 
         x4 = x1 + 4/5 * h
-        Cf4 = cf_location(x4,Cf_pb,Cf_nz)
+        Cf4 = cf_location(x4,Cf_dnz, Cf_cnz)
 
         A4 = geom_Area(x4)
         V4 = V + 44/45 * k1V - 56/15 * k2V + 32/9 * k3V
         P4 = P + 44/45 * k1P - 56/15 * k2P + 32/9 * k3P
         try:
-            T4 = newtonRaphson_T(T1, T1, x1, V1, V4, 4/5 * h,eta_total,P4,x_react) 
+            T4 = newtonRaphson_T(T1, T1, x1, V1, V4, 4/5 * h,eta_total,P4,combustion_end) 
             a4 = soS(T4,R_mix,gas_properties(T4, P4, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue
         M4 = mNum(V4,a4)
-        k4V = h * dVdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf4,x4,4/5 * h,eta_total,x_react)
-        k4P = h * dPdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf4,x4,4/5 * h,eta_total,x_react)
+        k4V = h * dVdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf4,x4,4/5 * h,eta_total,combustion_end)
+        k4P = h * dPdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf4,x4,4/5 * h,eta_total,combustion_end)
 
         x5 = x1 + 8/9 * h
-        Cf5 = cf_location(x5,Cf_pb,Cf_nz)
+        Cf5 = cf_location(x5,Cf_dnz, Cf_cnz)
         A5 = geom_Area(x5)
         V5 = V + 19372/6561 * k1V - 25360/2187 * k2V + 64448/6561 * k3V - 212/729 * k4V
         P5 = P + 19372/6561 * k1P - 25360/2187 * k2P + 64448/6561 * k3P - 212/729 * k4P
         try:
-            T5 = newtonRaphson_T(T1, T1, x1, V1, V5, 8/9 * h,eta_total,P5,x_react)
+            T5 = newtonRaphson_T(T1, T1, x1, V1, V5, 8/9 * h,eta_total,P5,combustion_end)
             a5 = soS(T5,R_mix,gas_properties(T5, P5, Y_mix)["gamma"])
 
         except:
@@ -582,43 +585,43 @@ def rk45Step(V,P,Cf_pb,Cf_nz, h, x, T_preburner,eta_total,x_react): #add stages 
             continue
 
         M5 = mNum(V5,a5)
-        k5V = h * dVdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,x_react)
-        k5P = h * dPdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,x_react)
+        k5V = h * dVdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,combustion_end)
+        k5P = h * dPdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,combustion_end)
 
         x6 = x1 + h
-        Cf6 = cf_location(x6,Cf_pb,Cf_nz)
+        Cf6 = cf_location(x6,Cf_dnz, Cf_cnz)
         A6 = geom_Area(x6)
         V6 = V + 9017/3168 * k1V - 355/33 * k2V + 46732/5247 * k3V + 49/176 * k4V - 5103/18656 * k5V
         P6 = P + 9017/3168 * k1P - 355/33 * k2P + 46732/5247 * k3P + 49/176 * k4P - 5103/18656 * k5P
         try:
-            T6 = newtonRaphson_T(T1, T1, x1, V1, V6, 1 * h,eta_total,P6,x_react)
+            T6 = newtonRaphson_T(T1, T1, x1, V1, V6, 1 * h,eta_total,P6,combustion_end)
             a6 = soS(T6,R_mix,gas_properties(T6, P6, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue
 
         M6 = mNum(V6,a6)
-        k6V = h * dVdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf6,x6,h,eta_total,x_react)
-        k6P = h * dPdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf6,x6,h,eta_total,x_react)
+        k6V = h * dVdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf6,x6,h,eta_total,combustion_end)
+        k6P = h * dPdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf6,x6,h,eta_total,combustion_end)
 
         #5th order solution 
         v_5Order = V + 35/384 * k1V + 500/1113 * k3V + 125/192 * k4V - 2187/6784 * k5V + 11/84 * k6V
         p_5Order = P + 35/384 * k1P + 500/1113 * k3P + 125/192 * k4P - 2187/6784 * k5P + 11/84 * k6P
 
         x7 = x1 + h
-        Cf7 = cf_location(x7,Cf_pb,Cf_nz)
+        Cf7 = cf_location(x7,Cf_dnz, Cf_cnz)
         A7 = geom_Area(x7)
         V7 = v_5Order
         P7 = p_5Order
         try:
-            T7 = newtonRaphson_T(T1, T1, x1, V1, V7, 1 * h,eta_total,P7,x_react)
+            T7 = newtonRaphson_T(T1, T1, x1, V1, V7, 1 * h,eta_total,P7,combustion_end)
             a7 = soS(T7,R_mix,gas_properties(T7, P7, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue       
         M7 = mNum(V7,a7)
-        k7V = h * dVdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf7,x7,h,eta_total,x_react)
-        k7P = h * dPdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf7,x7,h,eta_total,x_react)
+        k7V = h * dVdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf7,x7,h,eta_total,combustion_end)
+        k7P = h * dPdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf7,x7,h,eta_total,combustion_end)
 
         #4th order solution
         v_4Order = V + 5179/57600 * k1V + 7571/16695 * k3V + 393/640 * k4V - 92097/339200 * k5V + 187/2100 * k6V + 1/40 * k7V
@@ -642,7 +645,7 @@ def rk45Step(V,P,Cf_pb,Cf_nz, h, x, T_preburner,eta_total,x_react): #add stages 
 
             Vnext, Pnext = v_5Order, p_5Order
             xNext = x1 + h
-            Tnext = newtonRaphson_T(T1, T1, x1, V1, Vnext, 1 * h,eta_total,Pnext,x_react)
+            Tnext = newtonRaphson_T(T1, T1, x1, V1, Vnext, 1 * h,eta_total,Pnext,combustion_end)
 
             errorRatio = max(
                 errorV/(abs(V) * local_tol), errorP/(abs(P) * local_tol))
@@ -657,7 +660,7 @@ def rk45Step(V,P,Cf_pb,Cf_nz, h, x, T_preburner,eta_total,x_react): #add stages 
 
 
 #Full Solver
-def solver(Preburner_TStag,Cf_pb,Cf_nz,eta_total,x_react,scale, acceptedScale, postThroatSolve):
+def solver(Preburner_TStag,Cf_dnz, Cf_cnz,eta_total,combustion_end,scale, acceptedScale, postThroatSolve):
     global mdot,Vinj #making them global so that i can use them in rk45 and ode functions
     Vinj = 0
 
@@ -724,7 +727,7 @@ def solver(Preburner_TStag,Cf_pb,Cf_nz,eta_total,x_react,scale, acceptedScale, p
         Vbefore = velocities[-1]
         Pbefore = pressure[-1]
         Tbefore = temp [-1]
-        xNext, VCurrent, PCurrent, TCurrent, hNext, location = rk45Step(Vbefore,Pbefore,Cf_pb,Cf_nz,hPrev, xPrev,Tbefore,eta_total,x_react)
+        xNext, VCurrent, PCurrent, TCurrent, hNext, location = rk45Step(Vbefore,Pbefore,Cf_dnz, Cf_cnz,hPrev, xPrev,Tbefore,eta_total,combustion_end)
 
 
         if location == "Preburner":
@@ -868,26 +871,26 @@ def solver(Preburner_TStag,Cf_pb,Cf_nz,eta_total,x_react,scale, acceptedScale, p
 
 #Sweeping
 
-def chokedLocationResiduals(scale, Cf_pb,Cf_nz,eta_total,x_react):
-    results = solver(TstagA,Cf_pb,Cf_nz,eta_total,x_react,scale,False,False)
+def chokedLocationResiduals(scale, Cf_dnz, Cf_cnz,eta_total,combustion_end):
+    results = solver(TstagA,Cf_dnz, Cf_cnz,eta_total,combustion_end,scale,False,False)
     x_Choke = results["x"][-1]
     residual = throat_loc - x_Choke  #we want this to be zero
     return residual
     
-def eval_scale(scale,Cf_pb,Cf_nz,eta_total,x_react):
+def eval_scale(scale,Cf_dnz, Cf_cnz,eta_total,combustion_end):
     #scale, Cf = args
     try:
-        res = chokedLocationResiduals(scale, Cf_pb,Cf_nz,eta_total,x_react)
+        res = chokedLocationResiduals(scale, Cf_dnz, Cf_cnz,eta_total,combustion_end)
         return scale, res
     except Exception as eS:
         print("Scale Failed ", scale, eS)
         traceback.print_exc()
         return scale, np.nan
    
-def scaling_InletPressure_NOTPar(Cf_pb,Cf_nz,eta_total,x_react):
+def scaling_InletPressure_NOTPar(Cf_dnz, Cf_cnz,eta_total,combustion_end):
 
     max_scale = 1.0
-    max_res = chokedLocationResiduals(max_scale, Cf_pb,Cf_nz,eta_total,x_react)
+    max_res = chokedLocationResiduals(max_scale, Cf_dnz, Cf_cnz,eta_total,combustion_end)
 
     if max_res > 0:
         direction = 1
@@ -902,7 +905,7 @@ def scaling_InletPressure_NOTPar(Cf_pb,Cf_nz,eta_total,x_react):
     for i in range(1, 21):
         try:
             cur_scale = max_scale + direction * (i/10)
-            cur_scale, cur_res = eval_scale(cur_scale,Cf_pb,Cf_nz,eta_total,x_react)
+            cur_scale, cur_res = eval_scale(cur_scale,Cf_dnz, Cf_cnz,eta_total,combustion_end)
         except Exception as eS:
             print(f"Failed because of: {eS}")
             traceback.print_exc()
@@ -918,7 +921,7 @@ def scaling_InletPressure_NOTPar(Cf_pb,Cf_nz,eta_total,x_react):
         prev_res = cur_res
 
 
-def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf_pb,Cf_nz,eta_total,x_react):
+def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf_dnz, Cf_cnz,eta_total,combustion_end):
 
     tol = 1e-6
     maxIters = 100
@@ -955,7 +958,7 @@ def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf_pb,Cf_nz,eta
         else:
             scale_candidate = 0.5 * (scale_low + scale_high)
 
-        res_candidate = chokedLocationResiduals(scale_candidate, Cf_pb,Cf_nz,eta_total,x_react)
+        res_candidate = chokedLocationResiduals(scale_candidate, Cf_dnz, Cf_cnz,eta_total,combustion_end)
 
         # Track best residual seen
         if abs(res_candidate) < abs(best_res):
@@ -980,56 +983,6 @@ def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf_pb,Cf_nz,eta
 
     return best_scale, best_res
 
-
-'''
-True_Cf = 0.005
-start_total = time.perf_counter()
-
-start_sweep = time.perf_counter()
-high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf) #finding bracket 
-end_sweep = time.perf_counter()
-
-start_root = time.perf_counter()
-final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf)   # finding exact scale 
-end_root = time.perf_counter()
-
-start_solve = time.perf_counter()
-results_TrueCf = solver(TstagA,True_Cf,final_scale,True,True) #getting exact values at correct scale 
-end_solve = time.perf_counter()
-
-end_total = time.perf_counter()
-
-
-print("Sweep time", end_sweep - start_sweep)
-print("Root Time", end_root - start_root)
-print("Solve time"  , end_solve - start_solve)
-print("total Time", end_total - start_total)
-
-
-Test_Cf = 0.004
-high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Test_Cf) #finding bracket 
-
-final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Test_Cf)   # finding exact scale 
-
-results_TestCf = solver(TstagA,Test_Cf,final_scale,True,True) #getting exact values at correct scale 
-
-#Error_Cf = results_TestCf["PT_P"] - results_TrueCf["PT_P"]
-
-#norm_errorCf = np.linalg.norm(Error_Cf, ord = 1)
-
-#plt.plot(results_TrueCf["x"], results_TrueCf["pressure"] * 1e-6, '-', label = "True Cf ")
-#plt.plot(results_TrueCf["PT_X"], results_TrueCf["PT_P"] * 1e-6, 'o', label = "True Cf")
-
-plt.plot(results_TestCf["PT_X"], results_TestCf["PT_P"] * 1e-6, 'o', label = "Test Cf")
-plt.xlabel("x")
-plt.ylabel("Pressure MPa")
-plt.grid()
-plt.legend()
-plt.show()
-'''
-
-
-
 #MCMC set up
 #using black box approach 
 
@@ -1040,16 +993,16 @@ plt.show()
 #MCMC functions
 
 @as_op(itypes=[pt.dscalar,pt.dscalar,pt.dscalar,pt.dscalar,pt.dvector],otypes=[pt.dscalar]) 
-def log_likelihood(Cf_pb,Cf_nz,eta_total,x_react,true_PTPressure):    
-    Cf_pb = float(Cf_pb)
-    Cf_nz = float(Cf_nz)
+def log_likelihood(Cf_dnz, Cf_cnz,eta_total,combustion_end,true_PTPressure):    
+    Cf_dnz = float(Cf_dnz)
+    Cf_cnz = float(Cf_cnz)
     eta_total = float(eta_total)
-    x_react = float(x_react)
+    combustion_end = float(combustion_end)
 
     try:
-        high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf_pb,Cf_nz,eta_total,x_react) #finding bracket 
-        final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_pb,Cf_nz,eta_total,x_react)   # finding exact scale 
-        resultsAtCorrectScale = solver(TstagA,Cf_pb,Cf_nz,eta_total,x_react,final_scale,True,True) #getting exact values at correct scale 
+        high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf_dnz, Cf_cnz,eta_total,combustion_end) #finding bracket 
+        final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_dnz, Cf_cnz,eta_total,combustion_end)   # finding exact scale 
+        resultsAtCorrectScale = solver(TstagA,Cf_dnz, Cf_cnz,eta_total,combustion_end,final_scale,True,True) #getting exact values at correct scale 
         Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
 
         predicted_error = Predicted_PTPressure - true_PTPressure
@@ -1075,14 +1028,14 @@ def generatingTrueValues(True_Cf_pb,True_Cf_nz,True_eta_total,True_x_react):
     true_PTPressure = resultsAtCorrectScale["PT_P"]
     return true_PTPressure
 
-
+'''
 def likelihoodPlotting(frozenVar1, frozenVar2, frozenVar3, MovingVar):
 
     logplist = []
     count = 0 
     Cf_nz = frozenVar1
     eta_total = frozenVar2
-    x_react = frozenVar3
+    combustion_end = frozenVar3
     
     movingVar_grid = np.linspace(MovingVar - MovingVar * 0.2, MovingVar + MovingVar * 0.2, 50)
 
@@ -1100,9 +1053,9 @@ def likelihoodPlotting(frozenVar1, frozenVar2, frozenVar3, MovingVar):
         try:
             count+=1
 
-            high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(movingVariable,Cf_nz,eta_total,x_react) #finding bracket 
-            final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,movingVariable,Cf_nz,eta_total,x_react)   # finding exact scale 
-            resultsAtCorrectScale = solver(TstagA,movingVariable,Cf_nz,eta_total,x_react,final_scale,True,True) #getting exact values at correct scale 
+            high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(movingVariable,Cf_nz,eta_total,combustion_end) #finding bracket 
+            final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,movingVariable,Cf_nz,eta_total,combustion_end)   # finding exact scale 
+            resultsAtCorrectScale = solver(TstagA,movingVariable,Cf_nz,eta_total,combustion_end,final_scale,True,True) #getting exact values at correct scale 
             Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
 
             predicted_error = Predicted_PTPressure - true_PTPressure
@@ -1128,23 +1081,24 @@ def likelihoodPlotting(frozenVar1, frozenVar2, frozenVar3, MovingVar):
     plt.grid()
     plt.show()
 
-
+'''
 #MCMC Model
+
 def run_MCMC_case(caseConfig):
 
     param_names = caseConfig["Parameters"]
     
-    set_True_Cf_pb = caseConfig["True_Cf_pb"]
-    set_Cf_pb_Prior_mu = caseConfig["Cf_pb_Prior_mu"]
-    set_Cf_pb_Prior_sigma = caseConfig["Cf_pb_Prior_sigma"]
-    set_Cf_pb_scale = caseConfig["Cf_pb_Scale"]
-    set_Cf_pb_scaling = caseConfig["Cf_pb_Scaling"]
+    set_True_Cf_dNz = caseConfig["True_Cf_dNz"]
+    set_Cf_dNz_Prior_mu = caseConfig["Cf_dNz_Prior_mu"]
+    set_Cf_dNz_Prior_sigma = caseConfig["Cf_dNz_Prior_sigma"]
+    set_Cf_dNz_scale = caseConfig["Cf_dNz_Scale"]
+    set_Cf_dNz_scaling = caseConfig["Cf_dNz_Scaling"]
 
-    set_True_Cf_nz = caseConfig["True_Cf_nz"]
-    set_Cf_nz_Prior_mu = caseConfig["Cf_nz_Prior_mu"]
-    set_Cf_nz_Prior_sigma = caseConfig["Cf_nz_Prior_sigma"]
-    set_Cf_nz_scale = caseConfig["Cf_nz_Scale"]
-    set_Cf_nz_scaling = caseConfig["Cf_nz_Scaling"]
+    set_True_Cf_cNz = caseConfig["True_Cf_cNz"]
+    set_Cf_cNz_Prior_mu = caseConfig["Cf_cNz_Prior_mu"]
+    set_Cf_cNz_Prior_sigma = caseConfig["Cf_cNz_Prior_sigma"]
+    set_Cf_cNz_scale = caseConfig["Cf_cNz_Scale"]
+    set_Cf_cNz_scaling = caseConfig["Cf_cNz_Scaling"]
 
     set_True_eta_Total = caseConfig["True_eta_Total"]
     set_eta_Total_Prior_mu = caseConfig["eta_Total_Prior_mu"]
@@ -1152,11 +1106,11 @@ def run_MCMC_case(caseConfig):
     set_eta_Total_scale = caseConfig["eta_Total_Scale"]
     set_eta_Total_scaling = caseConfig["eta_Total_Scaling"]
 
-    set_True_x_react = caseConfig["True_x_react"]
-    set_x_react_Prior_mu = caseConfig["x_react_Prior_mu"]
-    set_x_react_Prior_sigma = caseConfig["x_react_Prior_sigma"]
-    set_x_react_scale = caseConfig["x_react_Scale"]
-    set_x_react_scaling = caseConfig["x_react_Scaling"]
+    set_True_combustion_end = caseConfig["True_combustion_end"]
+    set_combustion_end_Prior_mu = caseConfig["combustion_end_Prior_mu"]
+    set_combustion_end_Prior_sigma = caseConfig["combustion_end_Prior_sigma"]
+    set_combustion_end_scale = caseConfig["combustion_end_Scale"]
+    set_combustion_end_scaling = caseConfig["combustion_end_Scaling"]
 
     set_draws = caseConfig["Draws"]
     set_tune = caseConfig["Tune"]
@@ -1188,22 +1142,22 @@ def run_MCMC_case(caseConfig):
                     f.write(f"{key}: {value}\n")
 
 
-            true_PTPressure = generatingTrueValues(set_True_Cf_pb,set_True_Cf_nz,set_True_eta_Total,set_True_x_react)
-            prior_Cf_pb = pm.TruncatedNormal("Cf_pb", mu=set_Cf_pb_Prior_mu,  sigma=set_Cf_pb_Prior_sigma,lower = 0,initval=set_Cf_pb_Prior_mu,default_transform=None)
-            prior_Cf_nz = pm.TruncatedNormal("Cf_nz", mu=set_Cf_nz_Prior_mu,  sigma=set_Cf_nz_Prior_sigma,lower = 0,initval=set_Cf_nz_Prior_mu,default_transform=None)
+            true_PTPressure = generatingTrueValues(set_True_Cf_dNz,set_True_Cf_cNz,set_True_eta_Total,set_True_combustion_end)
+            prior_Cf_dNz = pm.TruncatedNormal("Cf_dNz", mu=set_Cf_dNz_Prior_mu,  sigma=set_Cf_dNz_Prior_sigma,lower = 0,initval=set_Cf_dNz_Prior_mu,default_transform=None)
+            prior_Cf_cNz = pm.TruncatedNormal("Cf_cNz", mu=set_Cf_cNz_Prior_mu,  sigma=set_Cf_cNz_Prior_sigma,lower = 0,initval=set_Cf_cNz_Prior_mu,default_transform=None)
 
             prior_eta_Total = pm.TruncatedNormal("eta_Total", mu=set_eta_Total_Prior_mu, sigma = set_eta_Total_Prior_sigma, lower = 0, upper = 1, initval=set_eta_Total_Prior_mu, default_transform=None)
-            prior_x_react = pm.TruncatedNormal("x_react", mu=set_x_react_Prior_mu, sigma = set_x_react_Prior_sigma, lower = 0, initval=set_x_react_Prior_mu, default_transform=None)
+            prior_combustion_end = pm.TruncatedNormal("combustion_end", mu=set_combustion_end_Prior_mu, sigma = set_combustion_end_Prior_sigma, lower = 0, initval=set_combustion_end_Prior_mu, default_transform=None)
 
-            log_like = log_likelihood(prior_Cf_pb,prior_Cf_nz,prior_eta_Total,prior_x_react,
+            log_like = log_likelihood(prior_Cf_dNz,prior_Cf_cNz,prior_eta_Total,prior_combustion_end,
                                       pt.as_tensor_variable(true_PTPressure, dtype="float64"))
 
             pm.Potential("Error Likelihood",log_like)
             
             step = pm.DEMetropolisZ(
-                vars = [prior_Cf_pb,prior_Cf_nz,prior_eta_Total,prior_x_react],
-                S= np.array([set_Cf_pb_scale,set_Cf_nz_scale,set_eta_Total_scale,set_x_react_scale]), 
-                scaling = np.array([set_Cf_pb_scaling,set_Cf_nz_scaling,set_eta_Total_scaling,set_x_react_scaling]),  #Initial scale factor for how aggressive the sampler noise moves around 
+                vars = [prior_Cf_dNz,prior_Cf_cNz,prior_eta_Total,prior_combustion_end],
+                S= np.array([set_Cf_dNz_scale,set_Cf_cNz_scale,set_eta_Total_scale,set_combustion_end_scale]), 
+                scaling = np.array([set_Cf_dNz_scaling,set_Cf_cNz_scaling,set_eta_Total_scaling,set_combustion_end_scaling]),  #Initial scale factor for how aggressive the sampler noise moves around 
                 tune="scaling",
                 tune_interval=100,
                 tune_drop_fraction=0.9
@@ -1235,27 +1189,27 @@ def run_MCMC_case(caseConfig):
 
     summary = az.summary(trace)
 
-    cf_pb_samples = trace.posterior["Cf_pb"].values.flatten()
-    cf_nz_samples = trace.posterior["Cf_nz"].values.flatten()
+    cf_dNz_samples = trace.posterior["Cf_dNz"].values.flatten()
+    cf_cNz_samples = trace.posterior["Cf_cNz"].values.flatten()
     eta_Total_samples = trace.posterior["eta_Total"].values.flatten()
-    x_react_samples = trace.posterior["x_react"].values.flatten()
+    combustion_end_samples = trace.posterior["combustion_end"].values.flatten()
     
     with open(case_folder/ f"{nameofCase}_MCMC_Report.txt", "w") as f:
         f.write(f"Parameters Included in Model = {param_names}\n")
 
         f.write(f"{caseConfig['Case_Name']} Values \n")
 
-        f.write(f"\nTrue Preburner Cf = {set_True_Cf_pb}\n")
-        f.write(f"Preburner Cf Prior Mean = {set_Cf_pb_Prior_mu}\n")
-        f.write(f"Preburner Cf Prior Sigma = {set_Cf_pb_Prior_sigma}\n")
-        f.write(f"Preburner Cf Scale = {set_Cf_pb_scale}\n")
-        f.write(f"Preburner Cf Scaling = {set_Cf_pb_scaling}\n")
+        f.write(f"\nTrue Diverging Nozzle Cf = {set_True_Cf_dNz}\n")
+        f.write(f"Diverging Nozzle Cf Prior Mean = {set_Cf_dNz_Prior_mu}\n")
+        f.write(f"Diverging Nozzle Cf Prior Sigma = {set_Cf_dNz_Prior_sigma}\n")
+        f.write(f"Diverging Nozzle Cf Scale = {set_Cf_dNz_scale}\n")
+        f.write(f"Diverging Nozzle Cf Scaling = {set_Cf_dNz_scaling}\n")
 
-        f.write(f"\nTrue Nozzle Cf = {set_True_Cf_nz}\n")
-        f.write(f"Nozzle Cf Prior Mean = {set_Cf_nz_Prior_mu}\n")
-        f.write(f"Nozzle Cf Prior Sigma = {set_Cf_nz_Prior_sigma}\n")
-        f.write(f"Nozzle Cf Scale = {set_Cf_nz_scale}\n")
-        f.write(f"Nozzle Cf Scaling = {set_Cf_nz_scaling}\n")
+        f.write(f"\nTrue Converging Nozzle Cf = {set_True_Cf_cNz}\n")
+        f.write(f"Converging Nozzle Cf Prior Mean = {set_Cf_cNz_Prior_mu}\n")
+        f.write(f"Converging Nozzle Cf Prior Sigma = {set_Cf_cNz_Prior_sigma}\n")
+        f.write(f"Converging Nozzle Cf Scale = {set_Cf_cNz_scale}\n")
+        f.write(f"Converging Nozzle Cf Scaling = {set_Cf_cNz_scaling}\n")
 
         f.write(f"\nTrue Eta Total = {set_True_eta_Total}\n")
         f.write(f"Eta Total Prior Mean = {set_eta_Total_Prior_mu}\n")
@@ -1263,11 +1217,11 @@ def run_MCMC_case(caseConfig):
         f.write(f"Eta Total Scale = {set_eta_Total_scale}\n")
         f.write(f"Eta Total Scaling = {set_eta_Total_scaling}\n")
 
-        f.write(f"\nTrue x react = {set_True_x_react}\n")
-        f.write(f"x react Prior Mean = {set_x_react_Prior_mu}\n")
-        f.write(f"x react Prior Sigma = {set_x_react_Prior_sigma}\n")
-        f.write(f"x react Scale = {set_x_react_scale}\n")
-        f.write(f"x react Scaling = {set_x_react_scaling}\n")
+        f.write(f"\nTrue Combustion End = {set_True_combustion_end}\n")
+        f.write(f"Combustion End Prior Mean = {set_combustion_end_Prior_mu}\n")
+        f.write(f"Combustion End Prior Sigma = {set_combustion_end_Prior_sigma}\n")
+        f.write(f"Combustion End Scale = {set_combustion_end_scale}\n")
+        f.write(f"Combustion End Scaling = {set_combustion_end_scaling}\n")
         
         f.write("\nARVIZ Summary\n")
         f.write("---------------------\n")
@@ -1283,17 +1237,17 @@ def run_MCMC_case(caseConfig):
         f.write(f"Cores = {set_cores}\n")
 
     param_labels = {
-            "Cf_pb": "Preburner Friction Coefficient (Cf)",
-            "Cf_nz": "Nozzle Friction Coefficient (Cf)",
+            "Cf_dNz": "Diverging Nozzle Friction Coefficient (Cf)",
+            "Cf_cNz": "Converging Nozzle Friction Coefficient (Cf)",
             "eta_Total": "Combustion Efficiency (\u03b7_Total)",
-            "x_react": "Combustion Start Location"
+            "combustion_end": "Combustion End Location"
         }
     
     true_values = {
-            "Cf_pb": set_True_Cf_pb,
-            "Cf_nz": set_True_Cf_nz,
+            "Cf_dNz": set_True_Cf_dNz,
+            "Cf_cNz": set_True_Cf_cNz,
             "eta_Total": set_True_eta_Total,
-            "x_react" : set_True_x_react
+            "combustion_end" : set_True_combustion_end
         }
 
     for param in summary.index:
@@ -1337,26 +1291,26 @@ def run_MCMC_case(caseConfig):
         plt.close()
 
 
-    running_mean_cf_pb = np.cumsum(cf_pb_samples) / np.arange(1, len(cf_pb_samples) + 1)
-    running_mean_cf_nz = np.cumsum(cf_nz_samples) / np.arange(1, len(cf_nz_samples) + 1)
+    running_mean_cf_dNz = np.cumsum(cf_dNz_samples) / np.arange(1, len(cf_dNz_samples) + 1)
+    running_mean_cf_cNz = np.cumsum(cf_cNz_samples) / np.arange(1, len(cf_cNz_samples) + 1)
     running_mean_eta_Total = np.cumsum(eta_Total_samples) / np.arange(1, len(eta_Total_samples) + 1)
-    running_mean_x_react = np.cumsum(x_react_samples) / np.arange(1, len(x_react_samples) + 1)
+    running_mean_combustion_end = np.cumsum(combustion_end_samples) / np.arange(1, len(combustion_end_samples) + 1)
 
     #initialize a side-by-side figure layout (1 row, 4 columns)
     fig, axs = plt.subplots(1, 4, figsize=(20, 5))
 
-    # Cf_pb
-    axs[0].plot(running_mean_cf_pb, color="steelblue", label="Running mean")
-    axs[0].axhline(set_True_Cf_pb, color="red", linestyle="--", linewidth=1.5, label=f"True Preburner Cf = {set_True_Cf_pb}")
+    # Cf_div Nozzle
+    axs[0].plot(running_mean_cf_dNz, color="steelblue", label="Running mean")
+    axs[0].axhline(set_True_Cf_dNz, color="red", linestyle="--", linewidth=1.5, label=f"True Diverging Nozzle Cf = {set_True_Cf_dNz}")
     axs[0].set_xlabel("Sample", fontsize=11)
     axs[0].set_ylabel("Cf", fontsize=11)
     axs[0].set_title(f"Running Mean \u2014 Friction Coefficient | {nameofCase}", fontsize=11)
     axs[0].legend(fontsize=10)
     axs[0].grid(True, alpha=0.4)
 
-    # Cf_nz
-    axs[1].plot(running_mean_cf_nz, color="steelblue", label="Running mean")
-    axs[1].axhline(set_True_Cf_nz, color="red", linestyle="--", linewidth=1.5, label=f"True Nozzle Cf = {set_True_Cf_nz}")
+    # Cf_conv nozzle
+    axs[1].plot(running_mean_cf_cNz, color="steelblue", label="Running mean")
+    axs[1].axhline(set_True_Cf_cNz, color="red", linestyle="--", linewidth=1.5, label=f"True Converging Nozzle Cf = {set_True_Cf_cNz}")
     axs[1].set_xlabel("Sample", fontsize=11)
     axs[1].set_ylabel("Cf", fontsize=11)
     axs[1].set_title(f"Running Mean \u2014 Friction Coefficient | {nameofCase}", fontsize=11)
@@ -1372,12 +1326,12 @@ def run_MCMC_case(caseConfig):
     axs[2].legend(fontsize=10)
     axs[2].grid(True, alpha=0.4)
 
-    # x React
-    axs[3].plot(running_mean_x_react, color="darkorange", label="Running mean")
-    axs[3].axhline(set_True_x_react, color="red", linestyle="--", linewidth=1.5, label=f"True x = {set_True_x_react}")
+    # combustion_end
+    axs[3].plot(running_mean_combustion_end, color="darkorange", label="Running mean")
+    axs[3].axhline(set_True_combustion_end, color="red", linestyle="--", linewidth=1.5, label=f"True x = {set_True_combustion_end}")
     axs[3].set_xlabel("Sample", fontsize=11)
-    axs[3].set_ylabel("x_react", fontsize=11)
-    axs[3].set_title(f"Running Mean of x react | {nameofCase}", fontsize=11)
+    axs[3].set_ylabel("combustion_end", fontsize=11)
+    axs[3].set_title(f"Running Mean of Combustion End Location | {nameofCase}", fontsize=11)
     axs[3].legend(fontsize=10)
     axs[3].grid(True, alpha=0.4)
 
@@ -1386,7 +1340,7 @@ def run_MCMC_case(caseConfig):
     plt.savefig(case_folder / f"Combined_Metrics_{nameofCase}_Running_mean.png", dpi=200, bbox_inches='tight')
     plt.close(fig)
 
-    az.plot_pair(trace,var_names= ["Cf_pb","Cf_nz","eta_Total","x_react"])
+    az.plot_pair(trace,var_names= ["Cf_dNz","Cf_cNz","eta_Total","combustion_end"])
     plt.suptitle("Joint Posterior", y = 1.02)
     plt.tight_layout()
     plt.savefig(case_folder / f"PairPlot_{nameofCase}.png", dpi=150, bbox_inches = "tight")
@@ -1401,19 +1355,19 @@ if __name__ == "__main__":
         
         "4_Param_Base_Case": {
             "Case_Name": "4_Param_Base_Case",
-            "Parameters": ["Cf_pb","Cf_nz", "eta_Total","x_react"],
+            "Parameters": ["Cf_dNz","Cf_cNz", "eta_Total","combustion_end"],
 
-            "True_Cf_pb": 0.002,
-            "Cf_pb_Prior_mu" : 0.0019,
-            "Cf_pb_Prior_sigma" : (0.05 * 0.002),
-            "Cf_pb_Scale" : 0.001,
-            "Cf_pb_Scaling" : 0.001,
+            "True_Cf_dNz": 0.008,
+            "Cf_dNz_Prior_mu" : 0.0019,
+            "Cf_dNz_Prior_sigma" : (0.05 * 0.002),
+            "Cf_dNz_Scale" : 0.001,
+            "Cf_dNz_Scaling" : 0.001,
 
-            "True_Cf_nz": 0.008,
-            "Cf_nz_Prior_mu" : 0.0076,
-            "Cf_nz_Prior_sigma" : (0.008 * 0.05),
-            "Cf_nz_Scale" : 0.001,
-            "Cf_nz_Scaling" : 0.001,
+            "True_Cf_cNz": 0.005,
+            "Cf_cNz_Prior_mu" : 0.0076,
+            "Cf_cNz_Prior_sigma" : (0.008 * 0.05),
+            "Cf_cNz_Scale" : 0.001,
+            "Cf_cNz_Scaling" : 0.001,
 
             "True_eta_Total" : 0.8,
             "eta_Total_Prior_mu": 0.76,
@@ -1421,14 +1375,14 @@ if __name__ == "__main__":
             "eta_Total_Scale" : 0.1,
             "eta_Total_Scaling":0.001,
 
-            "True_x_react":0.2,
-            "x_react_Prior_mu" : 0.19,
-            "x_react_Prior_sigma" : (0.2 * 0.05),
-            "x_react_Scale" : 0.1,
-            "x_react_Scaling" : 0.001,
+            "True_combustion_end": preburner_length,
+            "combustion_end_Prior_mu" : preburner_length - 0.05 * preburner_length,
+            "combustion_end_Prior_sigma" : (0.05 * preburner_length),
+            "combustion_end_Scale" : 0.1,
+            "combustion_end_Scaling" : 0.001,
 
-            "Draws" : 2000,
-            "Tune" : 500,
+            "Draws" : 500,
+            "Tune" : 250,
             "Chains" : 10 ,
             "Cores" : 10
             },
