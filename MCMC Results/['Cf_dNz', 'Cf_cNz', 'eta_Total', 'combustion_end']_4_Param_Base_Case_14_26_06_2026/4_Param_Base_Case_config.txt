@@ -15,9 +15,9 @@ eta_Total_Prior_mu: 0.76
 eta_Total_Prior_sigma: 0.04000000000000001
 eta_Total_Scale: 0.1
 eta_Total_Scaling: 0.001
-True_combustion_end: 0.2
-combustion_end_Prior_mu: 0.19
-combustion_end_Prior_sigma: 0.010000000000000002
+True_combustion_end: 0.42
+combustion_end_Prior_mu: 0.39899999999999997
+combustion_end_Prior_sigma: 0.021
 combustion_end_Scale: 0.1
 combustion_end_Scaling: 0.001
 Draws: 500

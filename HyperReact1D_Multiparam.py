@@ -919,7 +919,9 @@ def scaling_InletPressure_NOTPar(Cf_dnz, Cf_cnz,eta_total,combustion_end):
         
         prev_scale = cur_scale
         prev_res = cur_res
-
+    raise RuntimeError(
+        f"No Bracket Found"
+    )
 
 def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf_dnz, Cf_cnz,eta_total,combustion_end):
 
@@ -1357,7 +1359,7 @@ if __name__ == "__main__":
             "Case_Name": "4_Param_Base_Case",
             "Parameters": ["Cf_dNz","Cf_cNz", "eta_Total","combustion_end"],
 
-            "True_Cf_dNz": 0.008,
+            "True_Cf_dNz": 0.005,
             "Cf_dNz_Prior_mu" : 0.0019,
             "Cf_dNz_Prior_sigma" : (0.05 * 0.002),
             "Cf_dNz_Scale" : 0.001,
