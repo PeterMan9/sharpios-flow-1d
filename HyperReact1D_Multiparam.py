@@ -1021,32 +1021,32 @@ def log_likelihood(Cf_dnz, Cf_cnz,eta_total,combustion_end,true_PTPressure):
             return np.array(-1.0e10, dtype=np.float64)
     
 
-def generatingTrueValues(True_Cf_pb,True_Cf_nz,True_eta_total,True_x_react):
+def generatingTrueValues(True_Cf_dNz,True_Cf_cNz,True_eta_total,True_x_react):
 
-    high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf_pb,True_Cf_nz,True_eta_total,True_x_react) #finding bracket 
-    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf_pb,True_Cf_nz,True_eta_total,True_x_react)   # finding exact scale 
-    resultsAtCorrectScale = solver(TstagA,True_Cf_pb,True_Cf_nz,True_eta_total,True_x_react,final_scale,True,True) #getting exact values at correct scale 
+    high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf_dNz,True_Cf_cNz,True_eta_total,True_x_react) #finding bracket 
+    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf_dNz,True_Cf_cNz,True_eta_total,True_x_react)   # finding exact scale 
+    resultsAtCorrectScale = solver(TstagA,True_Cf_dNz,True_Cf_cNz,True_eta_total,True_x_react,final_scale,True,True) #getting exact values at correct scale 
 
     true_PTPressure = resultsAtCorrectScale["PT_P"]
     return true_PTPressure
 
-'''
 def likelihoodPlotting(frozenVar1, frozenVar2, frozenVar3, MovingVar):
 
     logplist = []
     count = 0 
-    Cf_nz = frozenVar1
-    eta_total = frozenVar2
-    combustion_end = frozenVar3
+    Cf_dNz = frozenVar1
+    Cf_cNz = frozenVar2
+    eta_total = frozenVar3
+    combustion_end = MovingVar
     
     movingVar_grid = np.linspace(MovingVar - MovingVar * 0.2, MovingVar + MovingVar * 0.2, 50)
 
-    True_Cf_pb = 0.002
-    True_Cf_nz = 0.005
+    True_Cf_dNz = 0.007
+    True_Cf_cNz = 0.004
     True_eta_Total = 0.8
-    True_x_react = 0.2
+    True_combustion_end = preburner_length
 
-    true_PTPressure = generatingTrueValues(True_Cf_pb,True_Cf_nz, True_eta_Total,True_x_react)
+    true_PTPressure = generatingTrueValues(True_Cf_dNz,True_Cf_cNz, True_eta_Total,True_combustion_end)
 
     count = 0
 
@@ -1055,9 +1055,9 @@ def likelihoodPlotting(frozenVar1, frozenVar2, frozenVar3, MovingVar):
         try:
             count+=1
 
-            high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(movingVariable,Cf_nz,eta_total,combustion_end) #finding bracket 
-            final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,movingVariable,Cf_nz,eta_total,combustion_end)   # finding exact scale 
-            resultsAtCorrectScale = solver(TstagA,movingVariable,Cf_nz,eta_total,combustion_end,final_scale,True,True) #getting exact values at correct scale 
+            high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf_dNz, Cf_cNz,eta_total,movingVariable) #finding bracket 
+            final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_dNz, Cf_cNz,eta_total,movingVariable)   # finding exact scale 
+            resultsAtCorrectScale = solver(TstagA,Cf_dNz, Cf_cNz,eta_total,movingVariable,final_scale,True,True) #getting exact values at correct scale 
             Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
 
             predicted_error = Predicted_PTPressure - true_PTPressure
@@ -1083,7 +1083,9 @@ def likelihoodPlotting(frozenVar1, frozenVar2, frozenVar3, MovingVar):
     plt.grid()
     plt.show()
 
-'''
+if __name__ == "__main__":
+   results_likelihood = likelihoodPlotting(0.007,0.004,0.8,preburner_length)
+
 #MCMC Model
 
 def run_MCMC_case(caseConfig):
@@ -1347,7 +1349,7 @@ def run_MCMC_case(caseConfig):
     plt.tight_layout()
     plt.savefig(case_folder / f"PairPlot_{nameofCase}.png", dpi=150, bbox_inches = "tight")
     plt.close()
-
+'''
 #cases and running model 
 if __name__ == "__main__":
    
@@ -1396,3 +1398,4 @@ if __name__ == "__main__":
 
     run_MCMC_case(case)
 
+'''
