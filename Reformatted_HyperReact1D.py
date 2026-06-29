@@ -1,11 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
-
 import cantera as ct
-
-from scipy.optimize import fsolve
 from scipy import stats
-from scipy.optimize import least_squares
 
 import pymc as pm
 import pytensor.tensor as pt
@@ -13,11 +9,84 @@ from pytensor.compile.ops import as_op
 import arviz as az
 
 import sys
-import warnings
 from datetime import datetime
 from pathlib import Path
 import traceback
-warnings.filterwarnings("ignore", category=FutureWarning)
+from dataclasses import dataclass, fields
+
+class modelParam:
+    value: float
+    sample: bool = False
+    true_value: float | None = None
+    prior_mu: float| None = None
+    prior_sigma: float| None = None
+    scale: float| None = None
+    scaling: float| None = None
+
+class modelParams:
+    Cf_pb: modelParam
+    Cf_cNz: modelParam
+    Cf_dNz: modelParam
+    eta_total: modelParam
+    x_react : modelParam
+    combustion_end: modelParam
+    
+    def sampled(self):
+        return{
+            field.name: getattr(self,field.name)
+            for field in fields(self)
+            if getattr(self, field.name).sample
+        }
+
+    def params_sampled(self):
+        return list(self.sampled().keys())
+    
+    def get_value(self,name,sampled_values = None):
+        sampled_values = sampled_values or {}
+
+        var = getattr(self,name)
+
+        if var.sample and name in sampled_values:
+            return sampled_values[name]
+        
+        return var.value
+
+def set_model_Parameters():    
+    return modelParams(
+        Cf_pb = modelParam(value = 0.002, sample = False),
+        Cf_cNz = modelParam(value = 0.004, sample = False),
+        x_react = modelParam(value = 0.05, sample = False),
+
+        Cf_dNz = modelParam(
+            value = 0.005,
+            sample = True,
+            true_value = 0.005,
+            prior_mu = 0.005 - (0.005 * 0.05),
+            prior_sigma = 0.005 * 0.05,
+            scale = 0.001,
+            scaling = 0.001
+        ),
+        eta_Total = modelParam(
+            value = 0.8,
+            sample = True,
+            true_value = 0.8,
+            prior_mu = 0.8 - (0.8 * 0.05),
+            prior_sigma = 0.8 * 0.05,
+            scale = 0.1,
+            scaling = 0.001
+        ),
+        combustion_end = modelParam(
+            value = 0.42,
+            sample = True,
+            true_value = 0.42,
+            prior_mu = 0.42 - (0.42 * 0.05),
+            prior_sigma = 0.42 * 0.05,
+            scale = 0.1,
+            scaling = 0.001
+        ),
+    )
+
+forward_modelParams = set_model_Parameters()
 
 Vinj = None 
 injMdot = 0
@@ -94,19 +163,19 @@ def pressureTap(x_old, p_old, x_new, p_new, PT_locations):
     
     return None,None
     
-def cf_location(x,Cf_dnz):
+def cf_location(x,forward_modelParams,sampled_values = None):
     region = geometry_regions(x)
-    Cf_preburner = 0.0025
-    Cf_cNz = 0.004
+    Cf_pb = forward_modelParams.get_value("Cf_pb", sampled_values)
+    Cf_cNz = forward_modelParams.get_value("Cf_cNz", sampled_values)
+    Cf_dNz = forward_modelParams.get_value("Cf_dNz", sampled_values)
+
     if region == "Preburner":
-        return Cf_preburner
-    
+        return Cf_pb
     elif region == "Throat" or region == "Conv Nozzle":
         return Cf_cNz
     elif region == "Div Nozzle" or region == "Test Section":
-        return Cf_dnz    
+        return Cf_dNz    
     
-
 def mNum(v,a): #mach number 
     M = v/a
     return M
@@ -148,34 +217,37 @@ hpr_h2 = 120e6 #J/kg
 fst = 0.029
 phi = 0.2306
 theta = 1
-x_react = 0.1
-def x_norm(x,combustion_end):
+def x_norm(x,combustion_end,x_react):
     return (x - x_react)/(combustion_end - x_react)
 
-def eta(x,eta_total,combustion_end):
-    eta = eta_total * (theta * x_norm(x,combustion_end)/(1 + (theta - 1) * x_norm(x,combustion_end)))
+def eta(x,eta_total,combustion_end,x_react):
+    eta = eta_total * (theta * x_norm(x,combustion_end,x_react)/(1 + (theta - 1) * x_norm(x,combustion_end,x_react)))
     return eta
 
-def dPHI(x,dx,eta_total,combustion_end):
+def dPHI(x,dx,eta_total,combustion_end,x_react):
     xcurrent = x
     xprev = x - dx
-    dPHI = phi * (eta(xcurrent,eta_total,combustion_end) - eta(xprev,eta_total,combustion_end))
+    dPHI = phi * (eta(xcurrent,eta_total,combustion_end,x_react) - eta(xprev,eta_total,combustion_end,x_react))
     return dPHI
 
-def dHtdx(x,dx,eta_total,combustion_end):
+def dHtdx(x,dx,forward_modelParams,sampled_values = None):
+    combustion_end = forward_modelParams.get_value("combustion_end", sampled_values)
+    x_react = forward_modelParams.get_value("x_react", sampled_values)
+    eta_total = forward_modelParams.get_value("eta_total", sampled_values)
+
     if x <= preburner_length:
-        return (dPHI(x,dx,eta_total,combustion_end) * hpr_h2 * fst)/dx
+        return (dPHI(x,dx,eta_total,combustion_end,x_react) * hpr_h2 * fst)/dx
     else:
         return 0
 
-def residualT(T_new,T_old,xOld,uOld,uNew,dx,eta_total,P,combustion_end):
+def residualT(T_new,T_old,xOld,uOld,uNew,dx,P,forward_modelParams,sampled_values = None):
     T_gasProperties_old = gas_properties(T_old, P, Y_mix)
     T_gasProperties_new = gas_properties(T_new, P, Y_mix)
     ht_old = T_gasProperties_old["h"]
     ht_new = T_gasProperties_new["h"]
     term1 = (ht_new - ht_old)
     term2 = (uNew**2 - uOld**2)/2
-    term3 = dHtdx(xOld,dx,eta_total,combustion_end) * dx
+    term3 = dHtdx(xOld,dx,forward_modelParams,sampled_values) * dx
     return term1 + term2 - term3
 
 #initial conditions
@@ -242,8 +314,6 @@ rho3 = mdot3_H2/(A_H2Injs * uB)
 M_h2 = (mdot3_H2/(rho3 * A_H2Injs))/a3
 #print("M_h2", M_h2)
 #print("rho1", rho1, "rho2", rho2, "rho3", rho3)
-
-A_CV_END = preburner_area #area at the end of the CV is the same as the area at the start of the preburner inlet.
     
 def delMdotdx(mdotn1, mdotn,x1,x): #dmdot/dx function
     return (mdotn1 - mdotn)/(x1-x)
@@ -254,31 +324,28 @@ def mdotFuncX (x):
     else:   #post injector mdot
         return mdot_i + injMdot 
 
-
-
-
 #1st order ODE Functions
-def dVdX (V,A,M,T,P,mdot,dmdotDX, Cf, x,dx,eta_total,combustion_end): #first 4 parts of sharpios 1d flow eqn converted to dV/dx
+def dVdX (V,A,M,T,P,mdot,dmdotDX,Cf,x,dx,forward_modelParams,sampled_values = None): #first 4 parts of sharpios 1d flow eqn converted to dV/dx
 
     gas_Prop = gas_properties(T, P, Y_mix)
     cp = gas_Prop["cp"]
     gamma = gas_Prop["gamma"]
 
     term1 = ((-V)/(A * (1 - M**2)))* dAdx(x)
-    term2 = ((V/((1-M**2) * cp * T)) * dHtdx(x,dx,eta_total,combustion_end))
+    term2 = ((V/((1-M**2) * cp * T)) * dHtdx(x,dx,forward_modelParams,sampled_values))
     term3 = ((gamma *M**2)/(2 * (1 - M**2)))
     term4 = ((((4 * Cf * V)/Dh(x))) - (2*(Vinj/mdot) * dmdotDX))
     term5 = (((V*(1 + gamma * M**2))/((1-M**2)*mdot)) * (dmdotDX))
     return term1 + term2 + (term3*term4) + term5
 
-def dPdX (V,A,M,T,P,mdot,dmdotDX, Cf, x,dx,eta_total,combustion_end): #first 4 parts of sharpios 1d flow eqn converted to dP/dx
+def dPdX (V,A,M,T,P,mdot,dmdotDX, Cf, x,dx,forward_modelParams,sampled_values = None): #first 4 parts of sharpios 1d flow eqn converted to dP/dx
     gas_Prop = gas_properties(T, P, Y_mix)
     cp = gas_Prop["cp"]
     gamma = gas_Prop["gamma"]
 
 
     term1 = ((gamma * M**2 * P)/(A * (1 - M**2))) * dAdx(x)
-    term2 = -(((gamma * M**2 * P)/((1-M**2) * cp * T)) * dHtdx(x,dx,eta_total,combustion_end))
+    term2 = -(((gamma * M**2 * P)/((1-M**2) * cp * T)) * dHtdx(x,dx,forward_modelParams,sampled_values))
     term3  = -((gamma * M**2 * (1 + (gamma-1) * M**2))/(2 * (1 - M**2)))
     term4 = (((4 * Cf * (P/Dh(x)))) - (2 * ((Vinj * P)/(mdot * V)) * (dmdotDX)))
     term5 = -(((2 * gamma * M**2 * (1 + ((gamma-1)/2) *M**2)*P)/((1-M**2)*mdot)) * (dmdotDX))
@@ -400,14 +467,14 @@ def CV_toPreburner(u2,T2,uA,uB,TA,TB): #this is newton raphson for the CV it goe
 
     return u2, T2
 
-def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx,eta_total,P,combustion_end):
+def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx,P,forward_modelParams,sampled_values = None):
     numIters = 0
     tol = 1e-8
-    E = residualT(T_Guess, T_old, xOld, uOld, uNew, dx,eta_total,P,combustion_end)
+    E = residualT(T_Guess, T_old, xOld, uOld, uNew, dx,P,forward_modelParams,sampled_values)
 
     while abs(E) >= tol and numIters <= 100:
         deltaT = max(abs(T_Guess)*1e-6, 1e-6)
-        dEdT = (residualT(T_Guess + deltaT, T_old, xOld, uOld, uNew, dx,eta_total,P,combustion_end) - E)/deltaT
+        dEdT = (residualT(T_Guess + deltaT, T_old, xOld, uOld, uNew, dx,P,forward_modelParams,sampled_values) - E)/deltaT
 
         if not np.isfinite(dEdT) or abs(dEdT) < 1e-14:
             raise RuntimeError("Bad temperature Newton derivative")
@@ -422,7 +489,7 @@ def newtonRaphson_T(T_Guess, T_old, xOld, uOld, uNew, dx,eta_total,P,combustion_
                 lamda *= 0.5
                 continue
 
-            E_new = residualT(T_new, T_old, xOld, uOld, uNew, dx,eta_total,P,combustion_end)
+            E_new = residualT(T_new, T_old, xOld, uOld, uNew, dx,P,forward_modelParams,sampled_values)
 
             if np.isfinite(E_new) and abs(E_new) < abs(E):
                 accepted = True
@@ -489,7 +556,7 @@ def newtonRaphson_P(P_guess, Pstag, T, gamma):
 
 #rk45
 
-def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end): #add stages for each mdot 3
+def rk45Step(V,P, h, x, T_preburner,forward_modelParams,sampled_values = None): #add stages for each mdot 3
     accepted = False 
     location = geometry_regions(x)
 
@@ -511,7 +578,7 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end): #add stage
         mdot_Current = mdotFuncX(x)
         mdot_Prev = mdotFuncX(x-h)
         x1 = x
-        Cf1 = cf_location(x1,Cf_dnz)
+        Cf1 = cf_location(x1,forward_modelParams,sampled_values)
         A1 = geom_Area(x1)
         V1 = V
         P1 =  P
@@ -522,63 +589,63 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end): #add stage
             h *= 0.5
             continue
         M1 = mNum(V1,a1)
-        k1V = h * dVdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf1,x1,h,eta_total,combustion_end)
-        k1P = h * dPdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf1,x1,h,eta_total,combustion_end)
+        k1V = h * dVdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf1,x1,h,forward_modelParams,sampled_values)
+        k1P = h * dPdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf1,x1,h,forward_modelParams,sampled_values)
 
         x2 = x1 + 1/5 * h
-        Cf2 = cf_location(x2,Cf_dnz)
+        Cf2 = cf_location(x2,forward_modelParams,sampled_values)
         A2 = geom_Area(x2)
         V2 = V + 1/5 * k1V 
         P2 = P + 1/5 * k1P
         try:
-            T2 = newtonRaphson_T(T1, T1, x1, V1, V2, 1/5 * h,eta_total,P2,combustion_end)
+            T2 = newtonRaphson_T(T1, T1, x1, V1, V2, 1/5 * h,P2,forward_modelParams,sampled_values)
             a2 = soS(T2,R_mix,gas_properties(T2, P2, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue
         M2 = mNum(V2,a2)
-        k2V = h * dVdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,combustion_end)
-        k2P = h * dPdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,combustion_end)
+        k2V = h * dVdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf2,x2,1/5 * h,forward_modelParams,sampled_values)
+        k2P = h * dPdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf2,x2,1/5 * h,forward_modelParams,sampled_values)
 
         x3 = x1 + 3/10 * h
-        Cf3 = cf_location(x3,Cf_dnz)
+        Cf3 = cf_location(x3,forward_modelParams,sampled_values)
 
         A3 = geom_Area(x3)
         V3 = V + 3/40 * k1V + 9/40 * k2V
         P3 = P + 3/40 * k1P + 9/40 * k2P
         try:
-            T3 = newtonRaphson_T(T1, T1, x1, V1, V3, 3/10 * h,eta_total,P3,combustion_end) 
+            T3 = newtonRaphson_T(T1, T1, x1, V1, V3, 3/10 * h,P3,forward_modelParams,sampled_values) 
             a3 = soS(T3,R_mix,gas_properties(T3, P3, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue
         M3 = mNum(V3,a3)
-        k3V = h * dVdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf3,x3,3/10 * h,eta_total,combustion_end)
-        k3P = h * dPdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf3,x3,3/10 * h,eta_total,combustion_end)
+        k3V = h * dVdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf3,x3,3/10 * h,forward_modelParams,sampled_values)
+        k3P = h * dPdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf3,x3,3/10 * h,forward_modelParams,sampled_values)
 
         x4 = x1 + 4/5 * h
-        Cf4 = cf_location(x4,Cf_dnz)
+        Cf4 = cf_location(x4,forward_modelParams,sampled_values)
 
         A4 = geom_Area(x4)
         V4 = V + 44/45 * k1V - 56/15 * k2V + 32/9 * k3V
         P4 = P + 44/45 * k1P - 56/15 * k2P + 32/9 * k3P
         try:
-            T4 = newtonRaphson_T(T1, T1, x1, V1, V4, 4/5 * h,eta_total,P4,combustion_end) 
+            T4 = newtonRaphson_T(T1, T1, x1, V1, V4, 4/5 * h,P4,forward_modelParams,sampled_values) 
             a4 = soS(T4,R_mix,gas_properties(T4, P4, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue
         M4 = mNum(V4,a4)
-        k4V = h * dVdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf4,x4,4/5 * h,eta_total,combustion_end)
-        k4P = h * dPdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf4,x4,4/5 * h,eta_total,combustion_end)
+        k4V = h * dVdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf4,x4,4/5 * h,forward_modelParams,sampled_values)
+        k4P = h * dPdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf4,x4,4/5 * h,forward_modelParams,sampled_values)
 
         x5 = x1 + 8/9 * h
-        Cf5 = cf_location(x5,Cf_dnz)
+        Cf5 = cf_location(x5,forward_modelParams,sampled_values)
         A5 = geom_Area(x5)
         V5 = V + 19372/6561 * k1V - 25360/2187 * k2V + 64448/6561 * k3V - 212/729 * k4V
         P5 = P + 19372/6561 * k1P - 25360/2187 * k2P + 64448/6561 * k3P - 212/729 * k4P
         try:
-            T5 = newtonRaphson_T(T1, T1, x1, V1, V5, 8/9 * h,eta_total,P5,combustion_end)
+            T5 = newtonRaphson_T(T1, T1, x1, V1, V5, 8/9 * h,P5,forward_modelParams,sampled_values)
             a5 = soS(T5,R_mix,gas_properties(T5, P5, Y_mix)["gamma"])
 
         except:
@@ -586,43 +653,43 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end): #add stage
             continue
 
         M5 = mNum(V5,a5)
-        k5V = h * dVdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,combustion_end)
-        k5P = h * dPdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,combustion_end)
+        k5V = h * dVdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf5,x5,8/9 * h,forward_modelParams,sampled_values)
+        k5P = h * dPdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf5,x5,8/9 * h,forward_modelParams,sampled_values)
 
         x6 = x1 + h
-        Cf6 = cf_location(x6,Cf_dnz)
+        Cf6 = cf_location(x6,forward_modelParams,sampled_values)
         A6 = geom_Area(x6)
         V6 = V + 9017/3168 * k1V - 355/33 * k2V + 46732/5247 * k3V + 49/176 * k4V - 5103/18656 * k5V
         P6 = P + 9017/3168 * k1P - 355/33 * k2P + 46732/5247 * k3P + 49/176 * k4P - 5103/18656 * k5P
         try:
-            T6 = newtonRaphson_T(T1, T1, x1, V1, V6, 1 * h,eta_total,P6,combustion_end)
+            T6 = newtonRaphson_T(T1, T1, x1, V1, V6, 1 * h,P6,forward_modelParams,sampled_values)
             a6 = soS(T6,R_mix,gas_properties(T6, P6, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue
 
         M6 = mNum(V6,a6)
-        k6V = h * dVdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf6,x6,h,eta_total,combustion_end)
-        k6P = h * dPdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf6,x6,h,eta_total,combustion_end)
+        k6V = h * dVdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf6,x6,h,forward_modelParams,sampled_values)
+        k6P = h * dPdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf6,x6,h,forward_modelParams,sampled_values)
 
         #5th order solution 
         v_5Order = V + 35/384 * k1V + 500/1113 * k3V + 125/192 * k4V - 2187/6784 * k5V + 11/84 * k6V
         p_5Order = P + 35/384 * k1P + 500/1113 * k3P + 125/192 * k4P - 2187/6784 * k5P + 11/84 * k6P
 
         x7 = x1 + h
-        Cf7 = cf_location(x7,Cf_dnz)
+        Cf7 = cf_location(x7,forward_modelParams,sampled_values)
         A7 = geom_Area(x7)
         V7 = v_5Order
         P7 = p_5Order
         try:
-            T7 = newtonRaphson_T(T1, T1, x1, V1, V7, 1 * h,eta_total,P7,combustion_end)
+            T7 = newtonRaphson_T(T1, T1, x1, V1, V7, 1 * h,P7,forward_modelParams,sampled_values)
             a7 = soS(T7,R_mix,gas_properties(T7, P7, Y_mix)["gamma"])
         except:
             h *= 0.5
             continue       
         M7 = mNum(V7,a7)
-        k7V = h * dVdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf7,x7,h,eta_total,combustion_end)
-        k7P = h * dPdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf7,x7,h,eta_total,combustion_end)
+        k7V = h * dVdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf7,x7,h,forward_modelParams,sampled_values)
+        k7P = h * dPdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf7,x7,h,forward_modelParams,sampled_values)
 
         #4th order solution
         v_4Order = V + 5179/57600 * k1V + 7571/16695 * k3V + 393/640 * k4V - 92097/339200 * k5V + 187/2100 * k6V + 1/40 * k7V
@@ -646,7 +713,7 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end): #add stage
 
             Vnext, Pnext = v_5Order, p_5Order
             xNext = x1 + h
-            Tnext = newtonRaphson_T(T1, T1, x1, V1, Vnext, 1 * h,eta_total,Pnext,combustion_end)
+            Tnext = newtonRaphson_T(T1, T1, x1, V1, Vnext, 1 * h,Pnext,forward_modelParams,sampled_values)
 
             errorRatio = max(
                 errorV/(abs(V) * local_tol), errorP/(abs(P) * local_tol))
@@ -661,7 +728,7 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end): #add stage
 
 
 #Full Solver
-def solver(Preburner_TStag,Cf_dnz,eta_total,combustion_end,scale, acceptedScale, postThroatSolve):
+def solver(Preburner_TStag,scale, acceptedScale, postThroatSolve,forward_modelParams,sampled_values = None):
     global mdot,Vinj #making them global so that i can use them in rk45 and ode functions
     Vinj = 0
 
@@ -728,7 +795,7 @@ def solver(Preburner_TStag,Cf_dnz,eta_total,combustion_end,scale, acceptedScale,
         Vbefore = velocities[-1]
         Pbefore = pressure[-1]
         Tbefore = temp [-1]
-        xNext, VCurrent, PCurrent, TCurrent, hNext, location = rk45Step(Vbefore,Pbefore,Cf_dnz,hPrev, xPrev,Tbefore,eta_total,combustion_end)
+        xNext, VCurrent, PCurrent, TCurrent, hNext, location = rk45Step(Vbefore,Pbefore,hPrev, xPrev,Tbefore,forward_modelParams,sampled_values)
 
 
         if location == "Preburner":
@@ -872,26 +939,26 @@ def solver(Preburner_TStag,Cf_dnz,eta_total,combustion_end,scale, acceptedScale,
 
 #Sweeping
 
-def chokedLocationResiduals(scale, Cf_dnz,eta_total,combustion_end):
-    results = solver(TstagA,Cf_dnz,eta_total,combustion_end,scale,False,False)
+def chokedLocationResiduals(scale, forward_modelParams,sampled_values = None):
+    results = solver(TstagA,scale,False,False,forward_modelParams,sampled_values)
     x_Choke = results["x"][-1]
     residual = throat_loc - x_Choke  #we want this to be zero
     return residual
     
-def eval_scale(scale,Cf_dnz,eta_total,combustion_end):
-    #scale, Cf = args
+def eval_scale(scale,forward_modelParams,sampled_values = None):
+
     try:
-        res = chokedLocationResiduals(scale, Cf_dnz,eta_total,combustion_end)
+        res = chokedLocationResiduals(scale, forward_modelParams,sampled_values)
         return scale, res
     except Exception as eS:
         print("Scale Failed ", scale, eS)
         traceback.print_exc()
         return scale, np.nan
    
-def scaling_InletPressure_NOTPar(Cf_dnz,eta_total,combustion_end):
+def scaling_InletPressure_NOTPar(forward_modelParams,sampled_values = None):
 
     max_scale = 1.0
-    max_res = chokedLocationResiduals(max_scale, Cf_dnz,eta_total,combustion_end)
+    max_res = chokedLocationResiduals(max_scale, forward_modelParams,sampled_values)
 
     if max_res > 0:
         direction = 1
@@ -906,7 +973,7 @@ def scaling_InletPressure_NOTPar(Cf_dnz,eta_total,combustion_end):
     for i in range(1, 21):
         try:
             cur_scale = max_scale + direction * (i/10)
-            cur_scale, cur_res = eval_scale(cur_scale,Cf_dnz,eta_total,combustion_end)
+            cur_scale, cur_res = eval_scale(cur_scale,forward_modelParams,sampled_values)
         except Exception as eS:
             print(f"Failed because of: {eS}")
             traceback.print_exc()
@@ -924,7 +991,7 @@ def scaling_InletPressure_NOTPar(Cf_dnz,eta_total,combustion_end):
         f"No Bracket Found"
     )
 
-def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf_dnz,eta_total,combustion_end):
+def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,forward_modelParams,sampled_values = None):
 
     tol = 1e-6
     maxIters = 100
@@ -961,7 +1028,7 @@ def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf_dnz,eta_tota
         else:
             scale_candidate = 0.5 * (scale_low + scale_high)
 
-        res_candidate = chokedLocationResiduals(scale_candidate, Cf_dnz,eta_total,combustion_end)
+        res_candidate = chokedLocationResiduals(scale_candidate, forward_modelParams,sampled_values)
 
         # Track best residual seen
         if abs(res_candidate) < abs(best_res):
@@ -995,16 +1062,19 @@ def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf_dnz,eta_tota
 
 #MCMC functions
 
-@as_op(itypes=[pt.dscalar,pt.dscalar,pt.dscalar,pt.dvector],otypes=[pt.dscalar]) 
-def log_likelihood(Cf_dnz,eta_total,combustion_end,true_PTPressure):    
-    Cf_dnz = float(Cf_dnz)
-    eta_total = float(eta_total)
-    combustion_end = float(combustion_end)
+@as_op(itypes=[pt.dvector,pt.dvector],otypes=[pt.dscalar]) 
+def log_likelihood(sampled_vector,true_PTPressure):    
+    sampled_names = forward_modelParams.modelParams.names_sampled()
+
+    sampled_values = {
+        name: float (sampled_vector[i])
+        for i, name in enumerate(sampled_names)
+    }
 
     try:
-        high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf_dnz,eta_total,combustion_end) #finding bracket 
-        final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_dnz,eta_total,combustion_end)   # finding exact scale 
-        resultsAtCorrectScale = solver(TstagA,Cf_dnz,eta_total,combustion_end,final_scale,True,True) #getting exact values at correct scale 
+        high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(forward_modelParams,sampled_values) #finding bracket 
+        final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,forward_modelParams,sampled_values)   # finding exact scale 
+        resultsAtCorrectScale = solver(TstagA,final_scale,True,True,forward_modelParams,sampled_values) #getting exact values at correct scale 
         Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
 
         predicted_error = Predicted_PTPressure - true_PTPressure
