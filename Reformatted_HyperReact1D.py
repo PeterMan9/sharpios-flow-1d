@@ -14,22 +14,26 @@ from pathlib import Path
 import traceback
 from dataclasses import dataclass, fields
 
-class modelParam:
+@dataclass
+class ModelParam:
     value: float
     sample: bool = False
     true_value: float | None = None
     prior_mu: float| None = None
     prior_sigma: float| None = None
+    lower: float| None = None
+    upper: float| None = None
     scale: float| None = None
     scaling: float| None = None
 
-class modelParams:
-    Cf_pb: modelParam
-    Cf_cNz: modelParam
-    Cf_dNz: modelParam
-    eta_total: modelParam
-    x_react : modelParam
-    combustion_end: modelParam
+@dataclass
+class ModelParams:
+    Cf_pb: ModelParam
+    Cf_cNz: ModelParam
+    Cf_dNz: ModelParam
+    eta_total: ModelParam
+    x_react : ModelParam
+    combustion_end: ModelParam
     
     def sampled(self):
         return{
@@ -52,35 +56,39 @@ class modelParams:
         return var.value
 
 def set_model_Parameters():    
-    return modelParams(
-        Cf_pb = modelParam(value = 0.002, sample = False),
-        Cf_cNz = modelParam(value = 0.004, sample = False),
-        x_react = modelParam(value = 0.05, sample = False),
+    return ModelParams(
+        Cf_pb = ModelParam(value = 0.002, sample = False),
+        Cf_cNz = ModelParam(value = 0.004, sample = False),
+        x_react = ModelParam(value = 0.05, sample = False),
 
-        Cf_dNz = modelParam(
+        Cf_dNz = ModelParam(
             value = 0.005,
             sample = True,
             true_value = 0.005,
             prior_mu = 0.005 - (0.005 * 0.05),
             prior_sigma = 0.005 * 0.05,
+            lower = 0,
             scale = 0.001,
             scaling = 0.001
         ),
-        eta_Total = modelParam(
+        eta_total = ModelParam(
             value = 0.8,
             sample = True,
             true_value = 0.8,
             prior_mu = 0.8 - (0.8 * 0.05),
             prior_sigma = 0.8 * 0.05,
+            lower = 0,
+            upper = 1,
             scale = 0.1,
             scaling = 0.001
         ),
-        combustion_end = modelParam(
+        combustion_end = ModelParam(
             value = 0.42,
             sample = True,
             true_value = 0.42,
             prior_mu = 0.42 - (0.42 * 0.05),
             prior_sigma = 0.42 * 0.05,
+            lower = 0,
             scale = 0.1,
             scaling = 0.001
         ),
@@ -372,10 +380,6 @@ def stagtostatic(Pstag,Tstag, M, gamma):
     P = Pstag * middleTerm **(- gamma/(gamma - 1))
     T = Tstag * middleTerm ** (-1)
     return P,T
-
-
-
-
 
 #Mixing Equations
 def E1_CV(ui,Ti,uA,uB,TA,TB):
@@ -1062,91 +1066,138 @@ def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,forward_modelPa
 
 #MCMC functions
 
-@as_op(itypes=[pt.dvector,pt.dvector],otypes=[pt.dscalar]) 
-def log_likelihood(sampled_vector,true_PTPressure):    
-    sampled_names = forward_modelParams.modelParams.names_sampled()
+ACTIVE_FORWARD_MODEL_PARAMS = forward_modelParams
 
+@as_op(itypes=[pt.dvector, pt.dvector], otypes=[pt.dscalar])
+def log_likelihood(sampled_vector, true_PTPressure):
+    sampled_names = ACTIVE_FORWARD_MODEL_PARAMS.params_sampled()
     sampled_values = {
-        name: float (sampled_vector[i])
+        name: float(sampled_vector[i])
         for i, name in enumerate(sampled_names)
     }
 
     try:
-        high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(forward_modelParams,sampled_values) #finding bracket 
-        final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,forward_modelParams,sampled_values)   # finding exact scale 
-        resultsAtCorrectScale = solver(TstagA,final_scale,True,True,forward_modelParams,sampled_values) #getting exact values at correct scale 
+        high_scale, low_scale, high_res, low_res = scaling_InletPressure_NOTPar(
+            ACTIVE_FORWARD_MODEL_PARAMS,
+            sampled_values,
+        )
+        final_scale, final_res = scale_HybridNewBisec(
+            low_scale,
+            high_scale,
+            low_res,
+            high_res,
+            ACTIVE_FORWARD_MODEL_PARAMS,
+            sampled_values,
+        )
+        resultsAtCorrectScale = solver(
+            TstagA,
+            final_scale,
+            True,
+            True,
+            ACTIVE_FORWARD_MODEL_PARAMS,
+            sampled_values,
+        )
         Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
 
         predicted_error = Predicted_PTPressure - true_PTPressure
-        percent_uncertainty = 0.01 
-        sigma_i = np.sqrt((percent_uncertainty * true_PTPressure)**2) 
-
-        log_prob = np.sum(stats.norm.logpdf(predicted_error,loc = 0.0,scale = sigma_i))
+        percent_uncertainty = 0.01
+        sigma_i = np.sqrt((percent_uncertainty * true_PTPressure)**2)
+        log_prob = np.sum(stats.norm.logpdf(predicted_error, loc=0.0, scale=sigma_i))
 
         return np.array(log_prob, dtype=np.float64)
-    
+
     except Exception as e:
-            print(f"Failed because of: {e}")
-            traceback.print_exc()
-            return np.array(-1.0e10, dtype=np.float64)
-    
+        print(f"Failed because of: {e}")
+        traceback.print_exc()
+        return np.array(-1.0e10, dtype=np.float64)
 
-def generatingTrueValues(True_Cf_dNz,True_eta_total,True_combustion_end):
 
-    high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf_dNz,True_eta_total,True_combustion_end) #finding bracket 
-    final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf_dNz,True_eta_total,True_combustion_end)   # finding exact scale 
-    resultsAtCorrectScale = solver(TstagA,True_Cf_dNz,True_eta_total,True_combustion_end,final_scale,True,True) #getting exact values at correct scale 
+def true_sampled_values(forward_modelParams):
+    return {
+        name: param.true_value
+        for name, param in forward_modelParams.sampled().items()
+    }
 
-    true_PTPressure = resultsAtCorrectScale["PT_P"]
-    return true_PTPressure
 
-def likelihoodPlotting(frozenVar1, frozenVar2, MovingVar):
+def generatingTrueValues(forward_modelParams):
+    sampled_values = true_sampled_values(forward_modelParams)
 
+    try: 
+        high_scale, low_scale, high_res, low_res = scaling_InletPressure_NOTPar(
+            forward_modelParams,
+            sampled_values,
+        )
+        final_scale, final_res = scale_HybridNewBisec(
+            low_scale,
+            high_scale,
+            low_res,
+            high_res,
+            forward_modelParams,
+            sampled_values,
+        )
+        resultsAtCorrectScale = solver(
+            TstagA,
+            final_scale,
+            True,
+            True,
+            forward_modelParams,
+            sampled_values,
+        )
+        return resultsAtCorrectScale["PT_P"]
+    except Exception as e:
+        print(f"Reason: {e}")
+        traceback.print.exc()
+        return None
+        
+
+
+def likelihoodPlotting(frozen_values, moving_name, moving_center, forward_modelParams=forward_modelParams):
     logplist = []
-    count = 0 
-    Cf_dNz = frozenVar1
-    eta_total = frozenVar2
-    combustion_end = MovingVar
-    
-    movingVar_grid = np.linspace(MovingVar - MovingVar * 0.2, MovingVar + MovingVar * 0.2, 50)
+    movingVar_grid = np.linspace(moving_center - moving_center * 0.2, moving_center + moving_center * 0.2, 50)
+    true_PTPressure = generatingTrueValues(forward_modelParams)
 
-    True_Cf_dNz = 0.007
-    True_eta_Total = 0.8
-    True_combustion_end = preburner_length
-
-    true_PTPressure = generatingTrueValues(True_Cf_dNz, True_eta_Total,True_combustion_end)
-
-    count = 0
-
-    for movingVariable in movingVar_grid:
-
+    for count, movingVariable in enumerate(movingVar_grid, start=1):
         try:
-            count+=1
+            sampled_values = dict(frozen_values)
+            sampled_values[moving_name] = movingVariable
 
-            high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf_dNz,eta_total,movingVariable) #finding bracket 
-            final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_dNz,eta_total,movingVariable)   # finding exact scale 
-            resultsAtCorrectScale = solver(TstagA,Cf_dNz,eta_total,movingVariable,final_scale,True,True) #getting exact values at correct scale 
+            high_scale, low_scale, high_res, low_res = scaling_InletPressure_NOTPar(
+                forward_modelParams,
+                sampled_values,
+            )
+            final_scale, final_res = scale_HybridNewBisec(
+                low_scale,
+                high_scale,
+                low_res,
+                high_res,
+                forward_modelParams,
+                sampled_values,
+            )
+            resultsAtCorrectScale = solver(
+                TstagA,
+                final_scale,
+                True,
+                True,
+                forward_modelParams,
+                sampled_values,
+            )
             Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
 
             predicted_error = Predicted_PTPressure - true_PTPressure
-            percent_uncertainty = 0.01 
-            sigma_i = np.sqrt((percent_uncertainty * true_PTPressure)**2) 
-
-            log_prob = np.sum(stats.norm.logpdf(predicted_error,loc = 0.0,scale = sigma_i))
+            sigma_i = 0.01 * true_PTPressure
+            log_prob = np.sum(stats.norm.logpdf(predicted_error, loc=0.0, scale=sigma_i))
             print(count)
             logplist.append(log_prob)
-        
-        except Exception as e:
-                print(f"Failed because of: {e}")
-        
 
+        except Exception as e:
+            print(f"Failed because of: {e}")
 
     logp_array = np.array(logplist)
     movingVar_list = movingVar_grid[:len(logp_array)]
-    
+
     plt.figure()
-    plt.plot(movingVar_list,logp_array)
-    plt.xlabel("Values")
+    plt.plot(movingVar_list, logp_array)
+    plt.xlabel(moving_name)
     plt.ylabel("Log Likelihood")
     plt.grid()
     plt.show()
@@ -1154,164 +1205,140 @@ def likelihoodPlotting(frozenVar1, frozenVar2, MovingVar):
 
 #MCMC Model
 
-def run_MCMC_case(caseConfig):
+def run_MCMC_case(forward_modelParams=forward_modelParams, case_name="Testing", draws=10, tune=15, chains=10, cores=10):
+    global ACTIVE_FORWARD_MODEL_PARAMS
+    ACTIVE_FORWARD_MODEL_PARAMS = forward_modelParams
 
-    param_names = caseConfig["Parameters"]
-    
-    set_True_Cf_dNz = caseConfig["True_Cf_dNz"]
-    set_Cf_dNz_Prior_mu = caseConfig["Cf_dNz_Prior_mu"]
-    set_Cf_dNz_Prior_sigma = caseConfig["Cf_dNz_Prior_sigma"]
-    set_Cf_dNz_scale = caseConfig["Cf_dNz_Scale"]
-    set_Cf_dNz_scaling = caseConfig["Cf_dNz_Scaling"]
+    sampled = forward_modelParams.sampled()
+    param_names = forward_modelParams.params_sampled()
 
-    set_True_eta_Total = caseConfig["True_eta_Total"]
-    set_eta_Total_Prior_mu = caseConfig["eta_Total_Prior_mu"]
-    set_eta_Total_Prior_sigma = caseConfig["eta_Total_Prior_sigma"]
-    set_eta_Total_scale = caseConfig["eta_Total_Scale"]
-    set_eta_Total_scaling = caseConfig["eta_Total_Scaling"]
+    if not param_names:
+        raise ValueError("At least one ModelParam must have sample=True to run MCMC.")
 
-    set_True_combustion_end = caseConfig["True_combustion_end"]
-    set_combustion_end_Prior_mu = caseConfig["combustion_end_Prior_mu"]
-    set_combustion_end_Prior_sigma = caseConfig["combustion_end_Prior_sigma"]
-    set_combustion_end_scale = caseConfig["combustion_end_Scale"]
-    set_combustion_end_scaling = caseConfig["combustion_end_Scaling"]
+    timestamp = datetime.now().strftime("%M_%H_%d_%m_%Y")
+    run_label = f"{param_names}_{case_name}_{timestamp}"
 
-    set_draws = caseConfig["Draws"]
-    set_tune = caseConfig["Tune"]
-    set_chains = caseConfig["Chains"]
-    set_cores = caseConfig["Cores"]
+    results_root = Path("MCMC Results")
+    results_root.mkdir(exist_ok=True)
+
+    case_folder = results_root / run_label
+    case_folder.mkdir(exist_ok=True)
+
+    diagnostics_folder = case_folder / "Diagnostics"
+    diagnostics_folder.mkdir(exist_ok=True)
+
+    with open(case_folder / f"{case_name}_config.txt", "w") as f:
+        for field in fields(forward_modelParams):
+            value = getattr(forward_modelParams, field.name)
+            f.write(f"{field.name}: {value}\n")
+
+    true_PTPressure = generatingTrueValues(forward_modelParams)
 
     with pm.Model() as model:
-      
-            timestamp = datetime.now().strftime("%M_%H_%d_%m_%Y")
+        prior_list = []
+        scales = []
+        scalings = []
 
-            run_label = (
-                f"{param_names}_"
-                f"{caseConfig['Case_Name']}_"
-                f"{timestamp}"
+        for name, param in sampled.items():
+            bounds = {}
+            if param.lower is not None:
+                bounds["lower"] = param.lower
+            if param.upper is not None:
+                bounds["upper"] = param.upper
+
+            prior = pm.TruncatedNormal(
+                name,
+                mu=param.prior_mu,
+                sigma=param.prior_sigma,
+                **bounds,
+                initval=param.prior_mu,
+                default_transform=None,
             )
-            nameofCase = caseConfig["Case_Name"]
+            prior_list.append(prior)
+            scales.append(param.scale if param.scale is not None else 1.0)
+            scalings.append(param.scaling if param.scaling is not None else 0.001)
 
-            results_root = Path("MCMC Results")
-            results_root.mkdir(exist_ok = True)
+        sampled_vector = pt.stack(prior_list)
+        log_like = log_likelihood(
+            sampled_vector,
+            pt.as_tensor_variable(true_PTPressure, dtype="float64"),
+        )
 
-            case_folder = results_root / run_label
-            case_folder.mkdir(exist_ok = True)
+        pm.Potential("Error Likelihood", log_like)
 
-            diagnostics_folder = case_folder / "Diagnostics"
-            diagnostics_folder.mkdir(exist_ok = True)
+        step = pm.DEMetropolisZ(
+            vars=prior_list,
+            S=np.array(scales),
+            scaling=np.array(scalings),
+            tune="scaling",
+            tune_interval=100,
+            tune_drop_fraction=0.9,
+        )
 
-            with open(case_folder/f"{nameofCase}_config.txt", "w") as f:
-                for key,value in caseConfig.items():
-                    f.write(f"{key}: {value}\n")
+        trace = pm.sample(
+            draws=draws,
+            tune=tune,
+            step=step,
+            chains=chains,
+            cores=cores,
+            random_seed=42,
+            progressbar=True,
+            return_inferencedata=True,
+            compute_convergence_checks=True,
+        )
 
+        print("Sample stats")
+        print(list(trace.sample_stats.data_vars))
 
-            true_PTPressure = generatingTrueValues(set_True_Cf_dNz,set_True_eta_Total,set_True_combustion_end)
-            prior_Cf_dNz = pm.TruncatedNormal("Cf_dNz", mu=set_Cf_dNz_Prior_mu,  sigma=set_Cf_dNz_Prior_sigma,lower = 0,initval=set_Cf_dNz_Prior_mu,default_transform=None)
-
-            prior_eta_Total = pm.TruncatedNormal("eta_Total", mu=set_eta_Total_Prior_mu, sigma = set_eta_Total_Prior_sigma, lower = 0, upper = 1, initval=set_eta_Total_Prior_mu, default_transform=None)
-            prior_combustion_end = pm.TruncatedNormal("combustion_end", mu=set_combustion_end_Prior_mu, sigma = set_combustion_end_Prior_sigma, lower = 0, initval=set_combustion_end_Prior_mu, default_transform=None)
-
-            log_like = log_likelihood(prior_Cf_dNz,prior_eta_Total,prior_combustion_end,
-                                      pt.as_tensor_variable(true_PTPressure, dtype="float64"))
-
-            pm.Potential("Error Likelihood",log_like)
-            
-            step = pm.DEMetropolisZ(
-                vars = [prior_Cf_dNz,prior_eta_Total,prior_combustion_end],
-                S= np.array([set_Cf_dNz_scale,set_eta_Total_scale,set_combustion_end_scale]), 
-                scaling = np.array([set_Cf_dNz_scaling,set_eta_Total_scaling,set_combustion_end_scaling]),  #Initial scale factor for how aggressive the sampler noise moves around 
-                tune="scaling",
-                tune_interval=100,
-                tune_drop_fraction=0.9
-            )
-
-            trace = pm.sample(
-                draws=set_draws,
-                tune=set_tune,
-                step = step,
-                chains=set_chains,
-                cores = set_cores, 
-                random_seed=42,
-                progressbar=True,
-                return_inferencedata=True,
-                compute_convergence_checks=True,
-            )
-
-            print("Sample stats")
-            print(list(trace.sample_stats.data_vars))
-
-            acceptance_rate = None
-            accepted = None
-
-            if "accepted" in trace.sample_stats.data_vars:
-                accepted = trace.sample_stats["accepted"].values
-                acceptance_rate = np.mean(accepted)
-
-                print("Overall acceptance rate:", acceptance_rate)
+        acceptance_rate = None
+        if "accepted" in trace.sample_stats.data_vars:
+            accepted = trace.sample_stats["accepted"].values
+            acceptance_rate = np.mean(accepted)
+            print("Overall acceptance rate:", acceptance_rate)
 
     summary = az.summary(trace)
 
-    cf_dNz_samples = trace.posterior["Cf_dNz"].values.flatten()
-    eta_Total_samples = trace.posterior["eta_Total"].values.flatten()
-    combustion_end_samples = trace.posterior["combustion_end"].values.flatten()
-    
-    with open(case_folder/ f"{nameofCase}_MCMC_Report.txt", "w") as f:
+    with open(case_folder / f"{case_name}_MCMC_Report.txt", "w") as f:
         f.write(f"Parameters Included in Model = {param_names}\n")
+        f.write(f"{case_name} Values\n")
 
-        f.write(f"{caseConfig['Case_Name']} Values \n")
+        for name, param in sampled.items():
+            f.write(f"\n{name}\n")
+            f.write(f"True Value = {param.true_value}\n")
+            f.write(f"Prior Mean = {param.prior_mu}\n")
+            f.write(f"Prior Sigma = {param.prior_sigma}\n")
+            f.write(f"Scale = {param.scale}\n")
+            f.write(f"Scaling = {param.scaling}\n")
 
-        f.write(f"\nTrue Diverging Nozzle Cf = {set_True_Cf_dNz}\n")
-        f.write(f"Diverging Nozzle Cf Prior Mean = {set_Cf_dNz_Prior_mu}\n")
-        f.write(f"Diverging Nozzle Cf Prior Sigma = {set_Cf_dNz_Prior_sigma}\n")
-        f.write(f"Diverging Nozzle Cf Scale = {set_Cf_dNz_scale}\n")
-        f.write(f"Diverging Nozzle Cf Scaling = {set_Cf_dNz_scaling}\n")
-
-        f.write(f"\nTrue Eta Total = {set_True_eta_Total}\n")
-        f.write(f"Eta Total Prior Mean = {set_eta_Total_Prior_mu}\n")
-        f.write(f"Eta Total Prior Sigma = {set_eta_Total_Prior_sigma}\n")
-        f.write(f"Eta Total Scale = {set_eta_Total_scale}\n")
-        f.write(f"Eta Total Scaling = {set_eta_Total_scaling}\n")
-
-        f.write(f"\nTrue Combustion End = {set_True_combustion_end}\n")
-        f.write(f"Combustion End Prior Mean = {set_combustion_end_Prior_mu}\n")
-        f.write(f"Combustion End Prior Sigma = {set_combustion_end_Prior_sigma}\n")
-        f.write(f"Combustion End Scale = {set_combustion_end_scale}\n")
-        f.write(f"Combustion End Scaling = {set_combustion_end_scaling}\n")
-        
         f.write("\nARVIZ Summary\n")
         f.write("---------------------\n")
         f.write(summary.to_string())
-
-        f.write("\nOther Results and metrics \n")
+        f.write("\nOther Results and metrics\n")
         f.write(f"Acceptance Rate: {acceptance_rate}\n")
-
         f.write("\nSettings:\n")
-        f.write(f"Draws = {set_draws}\n")
-        f.write(f"Tune = {set_tune}\n")
-        f.write(f"Chains = {set_chains}\n")
-        f.write(f"Cores = {set_cores}\n")
+        f.write(f"Draws = {draws}\n")
+        f.write(f"Tune = {tune}\n")
+        f.write(f"Chains = {chains}\n")
+        f.write(f"Cores = {cores}\n")
 
     param_labels = {
-            "Cf_dNz": "Diverging Nozzle Friction Coefficient (Cf)",
-            "eta_Total": "Combustion Efficiency (\u03b7_Total)",
-            "combustion_end": "Combustion End Location"
-        }
-    
-    true_values = {
-            "Cf_dNz": set_True_Cf_dNz,
-            "eta_Total": set_True_eta_Total,
-            "combustion_end" : set_True_combustion_end
-        }
+        "Cf_pb": "Preburner Friction Coefficient (Cf)",
+        "Cf_cNz": "Converging Nozzle Friction Coefficient (Cf)",
+        "Cf_dNz": "Diverging Nozzle Friction Coefficient (Cf)",
+        "eta_total": "Combustion Efficiency (eta_total)",
+        "x_react": "Reaction Start Location",
+        "combustion_end": "Combustion End Location",
+    }
+    true_values = {name: param.true_value for name, param in sampled.items()}
 
     for param in summary.index:
         label = param_labels.get(param, param)
         true_val = true_values.get(param)
 
         az.plot_trace(trace, var_names=[param])
-        plt.suptitle(f"Trace Plot \u2014 {label} | {nameofCase}", fontsize=11, y=1.01)
+        plt.suptitle(f"Trace Plot - {label} | {case_name}", fontsize=11, y=1.01)
         plt.tight_layout()
-        plt.savefig(diagnostics_folder / f"{param}_{nameofCase}_Trace.png", dpi=200)
+        plt.savefig(diagnostics_folder / f"{param}_{case_name}_Trace.png", dpi=200)
         plt.close()
 
         az.plot_dist(trace, var_names=[param])
@@ -1321,115 +1348,60 @@ def run_MCMC_case(caseConfig):
 
         plt.xlabel(label, fontsize=10)
         plt.ylabel("Density", fontsize=10)
-        plt.title(f"Posterior Distribution \u2014 {label} | {nameofCase}", fontsize=11)
+        plt.title(f"Posterior Distribution - {label} | {case_name}", fontsize=11)
         plt.tight_layout()
-        plt.savefig(case_folder / f"{param}_{nameofCase}_Posterior.png", dpi=200)
+        plt.savefig(case_folder / f"{param}_{case_name}_Posterior.png", dpi=200)
         plt.close()
 
         az.plot_autocorr(trace, var_names=[param])
-        plt.suptitle(f"Autocorrelation \u2014 {label} | {nameofCase}", fontsize=11, y=1.01)
+        plt.suptitle(f"Autocorrelation - {label} | {case_name}", fontsize=11, y=1.01)
         plt.tight_layout()
-        plt.savefig(diagnostics_folder / f"{param}_{nameofCase}_Autocorr.png", dpi=200)
+        plt.savefig(diagnostics_folder / f"{param}_{case_name}_Autocorr.png", dpi=200)
         plt.close()
 
         az.plot_ess(trace, var_names=[param])
-        plt.suptitle(f"ESS Plot \u2014 {label} | {nameofCase}", fontsize=11)
+        plt.suptitle(f"ESS Plot - {label} | {case_name}", fontsize=11)
         plt.tight_layout()
-        plt.savefig(diagnostics_folder / f"{param}_{nameofCase}_Ess.png", dpi=200)
+        plt.savefig(diagnostics_folder / f"{param}_{case_name}_Ess.png", dpi=200)
         plt.close()
 
         az.plot_rank(trace, var_names=[param])
-        plt.suptitle(f"rank Plot \u2014 {label} | {nameofCase}", fontsize=11)
+        plt.suptitle(f"Rank Plot - {label} | {case_name}", fontsize=11)
         plt.tight_layout()
-        plt.savefig(diagnostics_folder / f"{param}_{nameofCase}_rank.png", dpi=200)
+        plt.savefig(diagnostics_folder / f"{param}_{case_name}_rank.png", dpi=200)
         plt.close()
 
+    fig, axs = plt.subplots(1, len(param_names), figsize=(5 * len(param_names), 5))
+    if len(param_names) == 1:
+        axs = [axs]
 
-    running_mean_cf_dNz = np.cumsum(cf_dNz_samples) / np.arange(1, len(cf_dNz_samples) + 1)
-    running_mean_eta_Total = np.cumsum(eta_Total_samples) / np.arange(1, len(eta_Total_samples) + 1)
-    running_mean_combustion_end = np.cumsum(combustion_end_samples) / np.arange(1, len(combustion_end_samples) + 1)
-
-    #initialize a side-by-side figure layout (1 row, 4 columns)
-    fig, axs = plt.subplots(1, 4, figsize=(20, 5))
-
-    # Cf_div Nozzle
-    axs[0].plot(running_mean_cf_dNz, color="steelblue", label="Running mean")
-    axs[0].axhline(set_True_Cf_dNz, color="red", linestyle="--", linewidth=1.5, label=f"True Diverging Nozzle Cf = {set_True_Cf_dNz}")
-    axs[0].set_xlabel("Sample", fontsize=11)
-    axs[0].set_ylabel("Cf", fontsize=11)
-    axs[0].set_title(f"Running Mean \u2014 Friction Coefficient | {nameofCase}", fontsize=11)
-    axs[0].legend(fontsize=10)
-    axs[0].grid(True, alpha=0.4)
-
-
-    # Combustion Eff
-    axs[2].plot(running_mean_eta_Total, color="darkorange", label="Running mean")
-    axs[2].axhline(set_True_eta_Total, color="red", linestyle="--", linewidth=1.5, label=f"True \u03b7 = {set_True_eta_Total}")
-    axs[2].set_xlabel("Sample", fontsize=11)
-    axs[2].set_ylabel("\u03b7_Total", fontsize=11)
-    axs[2].set_title(f"Running Mean \u2014 Combustion Efficiency | {nameofCase}", fontsize=11)
-    axs[2].legend(fontsize=10)
-    axs[2].grid(True, alpha=0.4)
-
-    # combustion_end
-    axs[3].plot(running_mean_combustion_end, color="darkorange", label="Running mean")
-    axs[3].axhline(set_True_combustion_end, color="red", linestyle="--", linewidth=1.5, label=f"True x = {set_True_combustion_end}")
-    axs[3].set_xlabel("Sample", fontsize=11)
-    axs[3].set_ylabel("combustion_end", fontsize=11)
-    axs[3].set_title(f"Running Mean of Combustion End Location | {nameofCase}", fontsize=11)
-    axs[3].legend(fontsize=10)
-    axs[3].grid(True, alpha=0.4)
-
+    for ax, param in zip(axs, param_names):
+        samples = trace.posterior[param].values.flatten()
+        running_mean = np.cumsum(samples) / np.arange(1, len(samples) + 1)
+        ax.plot(running_mean, color="steelblue", label="Running mean")
+        true_val = true_values.get(param)
+        if true_val is not None:
+            ax.axhline(true_val, color="red", linestyle="--", linewidth=1.5, label=f"True = {true_val}")
+        ax.set_xlabel("Sample", fontsize=11)
+        ax.set_ylabel(param, fontsize=11)
+        ax.set_title(f"Running Mean - {param} | {case_name}", fontsize=11)
+        ax.legend(fontsize=10)
+        ax.grid(True, alpha=0.4)
 
     plt.tight_layout()
-    plt.savefig(case_folder / f"Combined_Metrics_{nameofCase}_Running_mean.png", dpi=200, bbox_inches='tight')
+    plt.savefig(case_folder / f"Combined_Metrics_{case_name}_Running_mean.png", dpi=200, bbox_inches="tight")
     plt.close(fig)
 
-    az.plot_pair(trace,var_names= ["Cf_dNz","eta_Total","combustion_end"])
-    plt.suptitle("Joint Posterior", y = 1.02)
-    plt.tight_layout()
-    plt.savefig(case_folder / f"PairPlot_{nameofCase}.png", dpi=150, bbox_inches = "tight")
-    plt.close()
+    if len(param_names) > 1:
+        az.plot_pair(trace, var_names=param_names)
+        plt.suptitle("Joint Posterior", y=1.02)
+        plt.tight_layout()
+        plt.savefig(case_folder / f"PairPlot_{case_name}.png", dpi=150, bbox_inches="tight")
+        plt.close()
 
-#cases and running model 
+    return trace
+
+
+#cases and running model
 if __name__ == "__main__":
-   
-    case_name = sys.argv[1]
-
-    all_cases = {
-        
-        "3_Param_Base_Case": {
-            "Case_Name": "3_Param_Base_Case",
-            "Parameters": ["Cf_dNz", "eta_Total","combustion_end"],
-
-            "True_Cf_dNz": 0.0055,
-            "Cf_dNz_Prior_sigma" : 0.05 * 0.0055,
-            "Cf_dNz_Prior_mu" : 0.0055 - (0.05 * 0.0055),
-            "Cf_dNz_Scale" : 0.001,
-            "Cf_dNz_Scaling" : 0.001,
-
-            "True_eta_Total" : 0.8,
-            "eta_Total_Prior_sigma": (0.05 * 0.8),
-            "eta_Total_Prior_mu": 0.8 - (0.05 * 0.8),
-            "eta_Total_Scale" : 0.1,
-            "eta_Total_Scaling":0.01,
-
-            "True_combustion_end": preburner_length,
-            "combustion_end_Prior_sigma" : (0.05 * preburner_length),
-            "combustion_end_Prior_mu" : preburner_length - (0.05 * preburner_length),
-            "combustion_end_Scale" : 0.1,
-            "combustion_end_Scaling" : 0.01,
-
-            "Draws" : 750,
-            "Tune" : 250,
-            "Chains" : 10 ,
-            "Cores" : 10
-            },
-    
-    }
-  
-
-    case = all_cases[case_name]
-
-    run_MCMC_case(case)
-
+    run_MCMC_case(forward_modelParams)
