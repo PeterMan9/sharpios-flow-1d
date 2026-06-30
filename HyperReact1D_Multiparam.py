@@ -62,10 +62,10 @@ def geom_Area(x, bl_h):
         return preburner_area
     elif x <= throat_loc:
         xi = (x - preburner_length)/conv_Nozzle_length
-        return preburner_area + smoothstep(xi) * ((throat_Area-bl_h) - preburner_area)
+        return preburner_area + smoothstep(xi) * ((np.sqrt(throat_Area)-bl_h)**2 - preburner_area)
     elif x <= nozzle_exit:
         xi = (x - throat_loc)/(div_Nozzle_length)
-        return throat_Area + smoothstep(xi) * (exit_Area - (throat_Area-bl_h))
+        return throat_Area + smoothstep(xi) * (exit_Area - (np.sqrt(throat_Area)-bl_h)**2)
     else:
         return exit_Area
     
@@ -513,14 +513,15 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end,bl_h): #add 
 
         if h < 1e-14:
             raise RuntimeError(f"RK45 step size got too small at x = {x:.4f}")
+        
         mdot_Current = mdotFuncX(x)
         mdot_Prev = mdotFuncX(x-h)
         x1 = x
         Cf1 = cf_location(x1,Cf_dnz)
         A1 = geom_Area(x1,bl_h)
-        print(A1)
         V1 = V
         P1 =  P
+
         try:
             T1 = T_preburner
             a1 = soS(T1,R_mix,gas_properties(T1, P1, Y_mix)["gamma"])
@@ -637,13 +638,14 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end,bl_h): #add 
         #error estimate 
         errorV = abs(v_5Order - v_4Order)
         errorP = abs(p_5Order - p_4Order)
-        err = max(errorV, errorP)
 
-        if errorV > V * local_tol or errorP > P * local_tol: #comparing error if either error are > than tol it means that step is too big so i am making it smaller 
+        errorRatioV = errorV/abs(V) * local_tol
+        errorRatioP = errorV/abs(P) * local_tol
+        errorRatio = max(errorRatioP,errorRatioV)
+        if errorRatio > 1: 
             accepted = False 
-            sV = 2 if errorV == 0 else 0.5*(local_tol/errorV)**(1/5)
-            sP = 2 if errorP == 0 else 0.5*(local_tol/errorP)**(1/5)
-            s = min(sV, sP)
+
+            s = 0.5 * errorRatio**(-1/5)
             h = min(s * h, h_max)
             continue #this just restarts the loop with the updated h value
             
@@ -654,9 +656,6 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end,bl_h): #add 
             xNext = x1 + h
             Tnext = newtonRaphson_T(T1, T1, x1, V1, Vnext, 1 * h,eta_total,Pnext,combustion_end,bl_h)
 
-            errorRatio = max(
-                errorV/(abs(V) * local_tol), errorP/(abs(P) * local_tol))
-            
             s = 1.2 if errorRatio == 0 else min(2, 0.9 * errorRatio**(-1/5))
 
             h_next = min(s * h, h_max)
@@ -1040,7 +1039,7 @@ def log_likelihood(Cf_dnz,eta_total,combustion_end,throat_obstruction,true_PTPre
             return np.array(-1.0e10, dtype=np.float64)
     
 
-def generatingTrueValues(True_Cf_dNz,True_eta_total,True_combustion_end,True_throat_obstruction)
+def generatingTrueValues(True_Cf_dNz,True_eta_total,True_combustion_end,True_throat_obstruction):
     try:
         True_bl_Y = bl_height(True_throat_obstruction)
         high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf_dNz,True_eta_total,True_combustion_end,True_bl_Y) #finding bracket 
