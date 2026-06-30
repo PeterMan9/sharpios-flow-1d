@@ -1,6 +1,0 @@
-Cf_pb: ModelParam(value=0.002, sample=False, true_value=None, prior_mu=None, prior_sigma=None, lower=None, upper=None, scale=None, scaling=None)
-Cf_cNz: ModelParam(value=0.004, sample=False, true_value=None, prior_mu=None, prior_sigma=None, lower=None, upper=None, scale=None, scaling=None)
-Cf_dNz: ModelParam(value=0.005, sample=True, true_value=0.005, prior_mu=0.00475, prior_sigma=0.00025, lower=0, upper=None, scale=0.001, scaling=0.001)
-eta_total: ModelParam(value=0.8, sample=True, true_value=0.8, prior_mu=0.76, prior_sigma=0.04000000000000001, lower=0, upper=1, scale=0.1, scaling=0.001)
-x_react: ModelParam(value=0.05, sample=False, true_value=None, prior_mu=None, prior_sigma=None, lower=None, upper=None, scale=None, scaling=None)
-combustion_end: ModelParam(value=0.42, sample=True, true_value=0.42, prior_mu=0.39899999999999997, prior_sigma=0.021, lower=0, upper=None, scale=0.1, scaling=0.001)
