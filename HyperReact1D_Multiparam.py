@@ -1532,8 +1532,8 @@ if __name__ == "__main__":
             "Case_Name": "5_param_LTune",
             "Parameters": ["Cf_dNz", "eta_Total","combustion_end","throat_obstruction","bl_growth"],
 
-            "Draws" : 750,
-            "Tune" : 250,
+            "Draws" : 10000,
+            "Tune" : 1000,
             "Chains" : 12 ,
             "Cores" : 12
             }, 

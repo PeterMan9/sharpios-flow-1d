@@ -23,15 +23,13 @@ that stuff didnt work
 
 Going to look into lamda tunning instead of scaling 
 THis kinda worked but not really. got some kinda of recovery on four variables out of five. Still  having issue with throat obstructon 
-
+ Lambda tunning works better. 
+ Im gonna do a very long run and see if it works 
 
 
 
 Assuming the code works i will add synthetic noise to my PT array - make sure the recovery works 
     and then talk to ral about where to go from there 
-
-
-
 
     look into caching mcmc run in case smth bad happens 
 
