@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 cases = [
-    "5_Param_LScaling",
+    "5_param_LTune",
 ]
 
 def run_case(CaseName):

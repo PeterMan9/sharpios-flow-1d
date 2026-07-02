@@ -1180,16 +1180,15 @@ def likelihoodPlotting(Cf_dNz, eta_total, combustion_end,throat_obstruction,bl_g
     plt.grid()
     plt.savefig("throat_obstruction.png")  # Saves to the remote workspace
     plt.close()
-
-
+'''
 if __name__ == "__main__":
     Cf_dNz = 0.007
     eta_total= 0.8
     combustion_end = preburner_length
-    throat_obstruction = 0.05
-    bl_growth = 3
+    throat_obstruction = 0.1
+    bl_growth = 10
     results = likelihoodPlotting(Cf_dNz, eta_total, combustion_end,throat_obstruction,bl_growth)
-
+'''
 #MCMC Model
 
 def run_MCMC_case(caseConfig):
@@ -1233,12 +1232,12 @@ def run_MCMC_case(caseConfig):
 
     with pm.Model() as model:
       
-            timestamp = datetime.now().strftime("%M_%H_%d_%m_%Y")
+            timestamp = datetime.now().strftime("%Y-%m_%d-%H-%M")
 
             run_label = (
-                f"{param_names}_"
+                f"{timestamp}_"
                 f"{caseConfig['Case_Name']}_"
-                f"{timestamp}"
+                f"{param_names}"
             )
             nameofCase = caseConfig["Case_Name"]
 
@@ -1263,11 +1262,11 @@ def run_MCMC_case(caseConfig):
             prior_eta_Total = pm.TruncatedNormal("eta_Total", mu=set_eta_Total_Prior_mu, sigma = set_eta_Total_Prior_sigma, 
                                                  lower = 0, upper = 1,initval=set_eta_Total_Prior_mu, default_transform=None)
             prior_combustion_end = pm.TruncatedNormal("combustion_end", mu=set_combustion_end_Prior_mu, sigma = set_combustion_end_Prior_sigma, 
-                                                      lower = 0,upper = 0.5,initval=set_combustion_end_Prior_mu, default_transform=None)
+                                                      lower = x_react,upper = 0.5,initval=set_combustion_end_Prior_mu, default_transform=None)
             prior_throat_obstruction = pm.TruncatedNormal("throat_obstruction", mu=set_throat_obstruction_Prior_mu, sigma = set_throat_obstruction_Prior_sigma, 
-                                                          lower = 0, upper = 0.13,initval=set_throat_obstruction_Prior_mu, default_transform=None)
+                                                          lower = 0.05, upper = 0.25,initval=set_throat_obstruction_Prior_mu, default_transform=None)
             prior_bl_growth = pm.TruncatedNormal("bl_growth", mu=set_bl_growth_Prior_mu, sigma = set_bl_growth_Prior_sigma,
-                                                  lower = 0, upper = 5, initval=set_bl_growth_Prior_mu, default_transform=None)
+                                                  lower = 5, upper = 15, initval=set_bl_growth_Prior_mu, default_transform=None)
 
             log_like = log_likelihood(prior_Cf_dNz,prior_eta_Total,prior_combustion_end,prior_throat_obstruction,prior_bl_growth,
                                       pt.as_tensor_variable(true_PTPressure, dtype="float64"))
@@ -1278,7 +1277,7 @@ def run_MCMC_case(caseConfig):
                 vars = [prior_Cf_dNz,prior_eta_Total,prior_combustion_end,prior_throat_obstruction,prior_bl_growth],
                 S= np.array([set_Cf_dNz_scale,set_eta_Total_scale,set_combustion_end_scale,set_throat_obstruction_scale,set_bl_growth_scale]), 
                 scaling = np.array([set_Cf_dNz_scaling,set_eta_Total_scaling,set_combustion_end_scaling,set_throat_obstruction_scaling,set_bl_growth_scaling]),  #Initial scale factor for how aggressive the sampler noise moves around 
-                tune="scaling",
+                tune="lambda",
                 tune_interval=100,
                 tune_drop_fraction=0.9
             )
@@ -1485,7 +1484,6 @@ def run_MCMC_case(caseConfig):
     plt.savefig(case_folder / f"PairPlot_{nameofCase}.png", dpi=150, bbox_inches = "tight")
     plt.close()
 
-'''
 #cases and running model 
 if __name__ == "__main__":
     
@@ -1497,44 +1495,44 @@ if __name__ == "__main__":
             "prior_mu": 0.007 * 0.95,
             "prior_sigma": 0.007 * 0.05,
             "scale": 0.001,
-            "scaling": 0.01,
+            "scaling": 0.05,
         },
         "eta_Total": {
             "true": 0.8,
-            "prior_mu": 0.8 * 0.95,
-            "prior_sigma": 0.8 * 0.05,
+            "prior_mu": 0.8 * 0.90,
+            "prior_sigma": 0.8 * 0.1,
             "scale": 0.1,
-            "scaling": 0.1,
+            "scaling": 0.5,
             },
         "combustion_end"  :{
             "true": preburner_length,
             "prior_mu": preburner_length * 0.95,
-            "prior_sigma": preburner_length * 0.05,
+            "prior_sigma": preburner_length * 0.5,
             "scale": 0.1,
             "scaling": 0.1,
         },
         "throat_obstruction" : {
-            "true": 0.05,
-            "prior_mu": 0.05 * 0.95,
-            "prior_sigma": 0.05 * 0.05,
+            "true": 0.15,
+            "prior_mu": 0.15 * 0.95,
+            "prior_sigma": 0.15 * 0.05,
             "scale": 0.01,
             "scaling": 0.01,
         },
         "bl_growth":{
-            "true": 3,
-            "prior_mu": 3 * 0.95,
-            "prior_sigma": 3 * 0.05,
+            "true": 10,
+            "prior_mu": 10 * 0.95,
+            "prior_sigma": 10 * 0.05,
             "scale": 1,
-            "scaling": 0.1,
+            "scaling": 0.01,
         }
     }
     
     all_cases = {    
-        "5_Param_LScaling": {
-            "Case_Name": "5_Param_LScaling",
+        "5_param_LTune": {
+            "Case_Name": "5_param_LTune",
             "Parameters": ["Cf_dNz", "eta_Total","combustion_end","throat_obstruction","bl_growth"],
 
-            "Draws" : 500,
+            "Draws" : 750,
             "Tune" : 250,
             "Chains" : 12 ,
             "Cores" : 12
@@ -1555,4 +1553,3 @@ if __name__ == "__main__":
         case = all_cases[case_name]
 
     run_MCMC_case(case)
-'''

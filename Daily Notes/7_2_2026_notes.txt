@@ -15,5 +15,25 @@ I think those are the main changes to make right now
 Besides if that still does not work I can look a bit more into finding a specific scaling and stuff for my parameters but i think the code should work now 
     going to run a test and see
 
+that didnt work 
+    it looks a bit better. better mixing and etc 
+    i upped the values of bl_growth and throat obstruction so maybe it will help
+
+that stuff didnt work 
+
+Going to look into lamda tunning instead of scaling 
+THis kinda worked but not really. got some kinda of recovery on four variables out of five. Still  having issue with throat obstructon 
+
+
+
+
 Assuming the code works i will add synthetic noise to my PT array - make sure the recovery works 
     and then talk to ral about where to go from there 
+
+
+
+
+    look into caching mcmc run in case smth bad happens 
+
+
+
