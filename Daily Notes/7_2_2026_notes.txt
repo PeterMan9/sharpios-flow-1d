@@ -1,0 +1,19 @@
+Continued working off of yesterdays Code  
+
+Put my code into a sandbox codex and asked if i had any weird bugs or logic stuff 
+Found out that i kinda of need to formula my prior better if i am doing a non zero x react 
+    i dont feel like doing that right now so I just set it to 0 
+I also found out that i was returning a finite probability when ever I had a bad case in my log likelihood
+    although -1e10 (what i was returning ) is a very small probability it is still possible 
+    I have changed that to -inf (-np.inf) so that when i get a bad case or a fail in my solver or what ever etc 
+    it just returns -inf which means that the point is fully invalid and the probability is just 0 
+        log -inf is just equal to 0 
+
+I think those are the main changes to make right now 
+    Later on I need to think of a better way 
+
+Besides if that still does not work I can look a bit more into finding a specific scaling and stuff for my parameters but i think the code should work now 
+    going to run a test and see
+
+Assuming the code works i will add synthetic noise to my PT array - make sure the recovery works 
+    and then talk to ral about where to go from there 

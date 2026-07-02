@@ -42,7 +42,7 @@ def smoothstep(xi):
 def geometry_regions(x):
     if x <= preburner_length:
         return "Preburner"
-    elif throat_loc <= x <= throat_loc + 0.005: 
+    elif throat_loc <= x <= throat_loc + 0.001: 
         return "Throat"
     elif x <= throat_loc:
         return "Conv Nozzle"
@@ -175,17 +175,19 @@ def Ymix(YA,mdotAir, YB, mdotH2):
 hpr_h2 = 120e6 #J/kg
 fst = 0.029
 phi = 0.2306
-theta = 1
-x_react = 0.1
+theta = 1.2
+x_react = 0.0
 
 #normalized preburner length
 def x_norm(x,combustion_end):
-    return (x - x_react)/(combustion_end - x_react)
+    X = (x - x_react)/(combustion_end - x_react)
+    return X
 
 #mixing eff func 
-def eta(x,eta_total,combustion_end):
-    eta = eta_total * (theta * x_norm(x,combustion_end)/(1 + (theta - 1) * x_norm(x,combustion_end)))
-    return eta
+def eta(x, eta_total, combustion_end):
+    X = x_norm(x, combustion_end)
+    return eta_total * (theta * X)/(1 + (theta - 1)*X)
+
 #deriv of phi with respect to dx but that part is sort of like inlucded later
 def dPHI(x,dx,eta_total,combustion_end):
     xcurrent = x
@@ -194,11 +196,8 @@ def dPHI(x,dx,eta_total,combustion_end):
     return dPHI
 
 #Smarts combustion model heat release with respect to dx 
-def dHtdx(x,dx,eta_total,combustion_end):
-    if x <= preburner_length:
-        return (dPHI(x,dx,eta_total,combustion_end) * hpr_h2 * fst)/dx
-    else:
-        return 0
+def dHtdx(x, dx, eta_total, combustion_end):
+    return (dPHI(x, dx, eta_total, combustion_end) * hpr_h2 * fst) / dx
 
 #residual for temp. Basically making sure that my resolved temperature in stuff like rk45 is constrained by my smarts heat release 
 #was havintg the issue that when I was solving for temp in rk45 using ideal gas law i would get massive temps because the variables were
@@ -531,11 +530,22 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end,bl_h,bl_grow
         h_max = 1e-4
 
     h = min(h,h_max)
-    while(accepted !=True):
+    attempts = 0
+
+    while accepted != True:
+        attempts += 1
+
+        if attempts > 200:
+            raise RuntimeError(
+                f"rk45Step failed to accept step: "
+                f"x={x}, h={h}, V={V}, P={P}, T={T_preburner}, "
+                f"Cf_dnz={Cf_dnz}, eta_total={eta_total}, "
+                f"combustion_end={combustion_end}"
+            )
 
         if h < 1e-14:
             raise RuntimeError(f"RK45 step size got too small at x = {x:.4f}")
-        
+            
         mdot_Current = mdotFuncX(x)
         mdot_Prev = mdotFuncX(x-h)
         x1 = x
@@ -684,7 +694,6 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end,bl_h,bl_grow
 
             h_next = min(s * h, h_max)
             break
-
     
     return xNext, Vnext, Pnext, Tnext,h_next, location
 
@@ -749,7 +758,28 @@ def solver(Preburner_TStag,Cf_dnz,eta_total,combustion_end,bl_h,bl_growth,scale,
     throat_count = 0
     conv_count = 0
     div_count = 0
-    while (xList[-1] < nozzle_exit ): #actual for loop for solving everything. from start of preburner to throat 
+    max_solver_steps = 20000
+    solver_steps = 0
+
+    while (xList[-1] < nozzle_exit):
+        solver_steps += 1
+
+        if solver_steps > max_solver_steps:
+            raise RuntimeError(
+                f"solver exceeded max_solver_steps:\n "
+                f"x={xList[-1]}, nozzle_exit={nozzle_exit},\n"
+                f"h={stepList[-1]},\n "
+                f"M={machNum[-1]},\n"
+                f"P={pressure[-1]},\n"
+                f"T={temp[-1]},\n"
+                f"location={geometry_regions(xList[-1])},\n"
+                f"acceptedScale={acceptedScale},\n"
+                f"postThroatSolve={postThroatSolve},\n"
+                f"Cf_dnz={Cf_dnz},\n"
+                f"eta_total={eta_total},\n"
+                f"combustion_end={combustion_end},\n"
+                f"bl_h={bl_h},\n"
+                f"bl_growth={bl_growth}\n" )#actual for loop for solving everything. from start of preburner to throat 
 
         xPrev = xList[-1]     
         hPrev = stepList[-1] #from step 0 to step 1 and then step 1 to step 2 etc 
@@ -806,6 +836,7 @@ def solver(Preburner_TStag,Cf_dnz,eta_total,combustion_end,bl_h,bl_growth,scale,
 
         sCurrent = currentMix_properties["s"]
         entropy.append(sCurrent)
+
         if postThroatSolve == True:
             pt_P, pt_x= pressureTap(xList[-2],pressure[-2],xCurrent, PCurrent,PT_locations)
 
@@ -813,10 +844,10 @@ def solver(Preburner_TStag,Cf_dnz,eta_total,combustion_end,bl_h,bl_growth,scale,
                 pt_location.append(pt_x)
                 pt_pressures.append(pt_P)
 
-        if MCurrent >= 0.99 and postThroatSolve == False:
+        if MCurrent > 0.99 and postThroatSolve == False:
             break
 
-        elif geometry_regions(xCurrent) == "Throat" and acceptedScale == True and postThroatSolve == True:
+        elif acceptedScale == True and postThroatSolve == True and (geometry_regions(xCurrent) == "Throat" or (MCurrent >= 0.99 and xCurrent < throat_loc)):
             throatP = pressure[-1]
             throatT = temp[-1]
             throatPstag = pStag[-1]
@@ -917,42 +948,58 @@ def eval_scale(scale,Cf_dnz,eta_total,combustion_end,bl_h,bl_growth):
         print("Scale Failed ", scale, eS)
         traceback.print_exc()
         return scale, np.nan
-   
-def scaling_InletPressure_NOTPar(Cf_dnz,eta_total,combustion_end,bl_h,bl_growth):
+def scaling_InletPressure_NOTPar(Cf_dnz, eta_total, combustion_end, bl_h, bl_growth):
 
     max_scale = 1.0
-    max_res = chokedLocationResiduals(max_scale, Cf_dnz,eta_total,combustion_end,bl_h,bl_growth)
+    max_res = chokedLocationResiduals(
+        max_scale, Cf_dnz, eta_total, combustion_end, bl_h, bl_growth
+    )
 
     if max_res > 0:
         direction = 1
     elif max_res < 0:
         direction = -1
     else:
-        return max_scale, max_scale
+        return max_scale, max_scale, max_res, max_res
 
     prev_scale = max_scale
     prev_res = max_res
 
     for i in range(1, 21):
         try:
-            cur_scale = max_scale + direction * (i/10)
-            cur_scale, cur_res = eval_scale(cur_scale,Cf_dnz,eta_total,combustion_end,bl_h,bl_growth)
+            cur_scale = max_scale + direction * (i / 10)
+            cur_scale, cur_res = eval_scale(
+                cur_scale, Cf_dnz, eta_total, combustion_end, bl_h, bl_growth
+            )
         except Exception as eS:
             print(f"Failed because of: {eS}")
             traceback.print_exc()
-
             continue
 
         if not np.isfinite(cur_res):
             continue
+
         if cur_res * prev_res < 0:
-            return cur_scale, prev_scale, cur_res, prev_res
-        
+            scale_low = cur_scale
+            scale_high = prev_scale
+            res_low = cur_res
+            res_high = prev_res
+
+            if scale_low > scale_high:
+                scale_low, scale_high = scale_high, scale_low
+                res_low, res_high = res_high, res_low
+
+            return scale_high, scale_low, res_high, res_low
+
         prev_scale = cur_scale
         prev_res = cur_res
+
     raise RuntimeError(
-        f"No Bracket Found"
+        f"No bracket found for inlet pressure scale. "
+        f"Last scale={prev_scale}, last residual={prev_res}, "
+        f"direction={direction}, "
     )
+
 
 def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf_dnz,eta_total,combustion_end,bl_h,bl_growth):
 
@@ -967,7 +1014,8 @@ def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf_dnz,eta_tota
     res_candidate = best_res
 
     for i in range(maxIters):
-
+        
+        
         width = scale_high - scale_low
 
         # Secant / false-position proposal
@@ -1016,14 +1064,13 @@ def scale_HybridNewBisec(scale_low, scale_high,res_low, res_high,Cf_dnz,eta_tota
 
     return best_scale, best_res
 
-#MCMC set up
+#MCMC functions
 #using black box approach 
 
 # wrapper for Op var. basically tells log_likelihood func that i am just putting in a double prec scalar and will
 # output a double precision scalar 
 # this is just so that i can easily pas my prior into my function 
 
-#MCMC functions
 
 @as_op(itypes=[pt.dscalar,pt.dscalar,pt.dscalar,pt.dscalar,pt.dscalar,pt.dvector],otypes=[pt.dscalar]) 
 def log_likelihood(Cf_dnz,eta_total,combustion_end,throat_obstruction,bl_growth,true_PTPressure):    
@@ -1040,6 +1087,12 @@ def log_likelihood(Cf_dnz,eta_total,combustion_end,throat_obstruction,bl_growth,
         resultsAtCorrectScale = solver(TstagA,Cf_dnz,eta_total,combustion_end,bl_Y,bl_growth,final_scale,True,True) #getting exact values at correct scale 
         Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
 
+        if Predicted_PTPressure.shape != true_PTPressure.shape:
+            raise RuntimeError(
+                f"PT shape mismatch: pred={Predicted_PTPressure.shape}, "
+                f"true={true_PTPressure.shape}, PT_X={resultsAtCorrectScale.get('PT_X')}"
+            )
+        
         predicted_error = Predicted_PTPressure - true_PTPressure
         percent_uncertainty = 0.01 
         sigma_i = np.sqrt((percent_uncertainty * true_PTPressure)**2) 
@@ -1051,7 +1104,7 @@ def log_likelihood(Cf_dnz,eta_total,combustion_end,throat_obstruction,bl_growth,
     except Exception as e:
             print(f"Failed because of: {e}")
             traceback.print_exc()
-            return np.array(-1.0e10, dtype=np.float64)
+            return np.array(-np.inf, dtype=np.float64)
     
 
 def generatingTrueValues(True_Cf_dNz,True_eta_total,True_combustion_end,True_throat_obstruction,True_bl_growth):
@@ -1067,12 +1120,14 @@ def generatingTrueValues(True_Cf_dNz,True_eta_total,True_combustion_end,True_thr
         print(f"Failed to Gen True Values because of {e}")
         raise
 
+#sensitivity testing for params 
+
 def likelihoodPlotting(Cf_dNz, eta_total, combustion_end,throat_obstruction,bl_growth):
 
     logplist = []
     count = 0 
     
-    MovingVar = combustion_end
+    MovingVar = throat_obstruction
 
     movingVar_grid = np.linspace(MovingVar - MovingVar * 0.05, MovingVar + MovingVar * 0.05, 50)
 
@@ -1086,27 +1141,32 @@ def likelihoodPlotting(Cf_dNz, eta_total, combustion_end,throat_obstruction,bl_g
     count = 0
 
     for movingvar in movingVar_grid:
-
+        count += 1
+        throat_obstruction = movingvar
         try:
-            count+=1
-
             bl_Y = bl_height(throat_obstruction)
-            high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(Cf_dNz,eta_total,movingvar,bl_Y,bl_growth) #finding bracket 
-            final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_dNz,eta_total,movingvar,bl_Y,bl_growth)   # finding exact scale 
-            resultsAtCorrectScale = solver(TstagA,Cf_dNz,eta_total,movingvar,bl_Y,bl_growth,final_scale,True,True) #getting exact values at correct scale 
+            high_scale, low_scale, high_res, low_res = scaling_InletPressure_NOTPar(Cf_dNz, eta_total, combustion_end, bl_Y, bl_growth)
+            final_scale, final_res = scale_HybridNewBisec(low_scale, high_scale,low_res, high_res,Cf_dNz, eta_total, combustion_end, bl_Y, bl_growth)
+            resultsAtCorrectScale = solver(TstagA,Cf_dNz,eta_total,combustion_end,bl_Y,bl_growth,final_scale,True,True)
+
             Predicted_PTPressure = resultsAtCorrectScale["PT_P"]
 
+            if Predicted_PTPressure.shape != true_PTPressure.shape:
+                raise RuntimeError(f"PT shape mismatch at {movingvar}: "f"pred={Predicted_PTPressure.shape}, true={true_PTPressure.shape}")
+
             predicted_error = Predicted_PTPressure - true_PTPressure
-            percent_uncertainty = 0.01 
-            sigma_i = np.sqrt((percent_uncertainty * true_PTPressure)**2) 
+            percent_uncertainty = 0.01
+            sigma_i = percent_uncertainty * np.abs(true_PTPressure)
 
-            log_prob = np.sum(stats.norm.logpdf(predicted_error,loc = 0.0,scale = sigma_i))
+            log_prob = np.sum(stats.norm.logpdf(predicted_error,loc=0.0,scale=sigma_i))
 
-            print(count)
+            print(count, movingvar, log_prob)
             logplist.append(log_prob)
-        
+
         except Exception as e:
-                print(f"Failed because of: {e}")
+            print(f"Failed at {movingvar} because of: {e}")
+            traceback.print_exc()
+            logplist.append(-np.inf)
         
 
 
@@ -1118,18 +1178,17 @@ def likelihoodPlotting(Cf_dNz, eta_total, combustion_end,throat_obstruction,bl_g
     plt.xlabel("Values")
     plt.ylabel("Log Likelihood")
     plt.grid()
-    plt.show()
+    plt.savefig("throat_obstruction.png")  # Saves to the remote workspace
+    plt.close()
 
-#sensitivity testing for params     
-'''
+
 if __name__ == "__main__":
     Cf_dNz = 0.007
-    eta_total= 0.5
+    eta_total= 0.8
     combustion_end = preburner_length
     throat_obstruction = 0.05
-    bl_growth = 20
+    bl_growth = 3
     results = likelihoodPlotting(Cf_dNz, eta_total, combustion_end,throat_obstruction,bl_growth)
-'''
 
 #MCMC Model
 
@@ -1199,11 +1258,16 @@ def run_MCMC_case(caseConfig):
 
             true_PTPressure = generatingTrueValues(set_True_Cf_dNz,set_True_eta_Total,set_True_combustion_end,set_True_throat_obstruction,set_True_bl_growth)
 
-            prior_Cf_dNz = pm.TruncatedNormal("Cf_dNz", mu=set_Cf_dNz_Prior_mu,  sigma=set_Cf_dNz_Prior_sigma,lower = 0,initval=set_Cf_dNz_Prior_mu,default_transform=None)
-            prior_eta_Total = pm.TruncatedNormal("eta_Total", mu=set_eta_Total_Prior_mu, sigma = set_eta_Total_Prior_sigma, lower = 0, upper = 1, initval=set_eta_Total_Prior_mu, default_transform=None)
-            prior_combustion_end = pm.TruncatedNormal("combustion_end", mu=set_combustion_end_Prior_mu, sigma = set_combustion_end_Prior_sigma, lower = 0, initval=set_combustion_end_Prior_mu, default_transform=None)
-            prior_throat_obstruction = pm.TruncatedNormal("throat_obstruction", mu=set_throat_obstruction_Prior_mu, sigma = set_throat_obstruction_Prior_sigma, lower = 0, initval=set_throat_obstruction_Prior_mu, default_transform=None)
-            prior_bl_growth = pm.TruncatedNormal("bl_growth", mu=set_bl_growth_Prior_mu, sigma = set_bl_growth_Prior_sigma, lower = 0, initval=set_bl_growth_Prior_mu, default_transform=None)
+            prior_Cf_dNz = pm.TruncatedNormal("Cf_dNz", mu=set_Cf_dNz_Prior_mu,  sigma=set_Cf_dNz_Prior_sigma,
+                                              lower = 0,upper = 0.009,initval=set_Cf_dNz_Prior_mu,default_transform=None)
+            prior_eta_Total = pm.TruncatedNormal("eta_Total", mu=set_eta_Total_Prior_mu, sigma = set_eta_Total_Prior_sigma, 
+                                                 lower = 0, upper = 1,initval=set_eta_Total_Prior_mu, default_transform=None)
+            prior_combustion_end = pm.TruncatedNormal("combustion_end", mu=set_combustion_end_Prior_mu, sigma = set_combustion_end_Prior_sigma, 
+                                                      lower = 0,upper = 0.5,initval=set_combustion_end_Prior_mu, default_transform=None)
+            prior_throat_obstruction = pm.TruncatedNormal("throat_obstruction", mu=set_throat_obstruction_Prior_mu, sigma = set_throat_obstruction_Prior_sigma, 
+                                                          lower = 0, upper = 0.13,initval=set_throat_obstruction_Prior_mu, default_transform=None)
+            prior_bl_growth = pm.TruncatedNormal("bl_growth", mu=set_bl_growth_Prior_mu, sigma = set_bl_growth_Prior_sigma,
+                                                  lower = 0, upper = 5, initval=set_bl_growth_Prior_mu, default_transform=None)
 
             log_like = log_likelihood(prior_Cf_dNz,prior_eta_Total,prior_combustion_end,prior_throat_obstruction,prior_bl_growth,
                                       pt.as_tensor_variable(true_PTPressure, dtype="float64"))
@@ -1421,9 +1485,10 @@ def run_MCMC_case(caseConfig):
     plt.savefig(case_folder / f"PairPlot_{nameofCase}.png", dpi=150, bbox_inches = "tight")
     plt.close()
 
+'''
 #cases and running model 
 if __name__ == "__main__":
-  
+    
     case_name = sys.argv[1]
 
     parameters = {
@@ -1432,24 +1497,21 @@ if __name__ == "__main__":
             "prior_mu": 0.007 * 0.95,
             "prior_sigma": 0.007 * 0.05,
             "scale": 0.001,
-            "scaling": 0.001,
-            "lower": 0,
+            "scaling": 0.01,
         },
         "eta_Total": {
-            "true": 0.5,
-            "prior_mu": 0.5 * 0.95,
-            "prior_sigma": 0.5 * 0.05,
+            "true": 0.8,
+            "prior_mu": 0.8 * 0.95,
+            "prior_sigma": 0.8 * 0.05,
             "scale": 0.1,
-            "scaling": 0.01,
-            "lower": 0,
+            "scaling": 0.1,
             },
         "combustion_end"  :{
             "true": preburner_length,
             "prior_mu": preburner_length * 0.95,
             "prior_sigma": preburner_length * 0.05,
             "scale": 0.1,
-            "scaling": 0.01,
-            "lower": 0,
+            "scaling": 0.1,
         },
         "throat_obstruction" : {
             "true": 0.05,
@@ -1457,31 +1519,28 @@ if __name__ == "__main__":
             "prior_sigma": 0.05 * 0.05,
             "scale": 0.01,
             "scaling": 0.01,
-            "lower": 0,
         },
         "bl_growth":{
-            "true": 20,
-            "prior_mu": 20 * 0.95,
-            "prior_sigma": 20 * 0.05,
+            "true": 3,
+            "prior_mu": 3 * 0.95,
+            "prior_sigma": 3 * 0.05,
             "scale": 1,
-            "scaling": 0.01,
-            "lower": 0,
+            "scaling": 0.1,
         }
-        }
+    }
     
-    all_cases = {
-        
-        "5_Param_Base_Case": {
-            "Case_Name": "5_Param_Base_Case",
+    all_cases = {    
+        "5_Param_LScaling": {
+            "Case_Name": "5_Param_LScaling",
             "Parameters": ["Cf_dNz", "eta_Total","combustion_end","throat_obstruction","bl_growth"],
 
-            "Draws" : 7000,
-            "Tune" : 500,
+            "Draws" : 500,
+            "Tune" : 250,
             "Chains" : 12 ,
             "Cores" : 12
-            },
-    
+            }, 
     }
+
     for case_name, case_data in all_cases.items():
         # It reads each string inside the "Parameters" list
         for param in case_data["Parameters"]:
@@ -1496,3 +1555,4 @@ if __name__ == "__main__":
         case = all_cases[case_name]
 
     run_MCMC_case(case)
+'''

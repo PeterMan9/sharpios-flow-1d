@@ -1,0 +1,40 @@
+
+so current issue i am having is that i get approx/good recovery on three or my five variables 
+I recovery to my true value for Cf_dNz, throat_obstruction, and bl_growth. 
+
+The interesting thing though is that when I do a "sensitivity check" on all 
+    these variables (basically freezing 4 of the var and then varying the left over one and then plotting the likelihood)
+    found that for the given values I am using, the forward model is a bit less sensitive 
+    to moving Cf_dNz, throat_obstruction, and bl_growth than moving eta_total and combustion_end.
+    This baically means that my likelihood for those three var
+    is more "flat"/does not have as big of a diff between its peak and lowest point of the dist. 
+
+From what I understand it should be the opposite, the variables that create a less flat likelihood/the forward model is much more sensitive to 
+should dominate the mcmc sampling which would result in a posterior for the three varables that look similar to their priors and a good recovery for 
+the two dominant variables 
+
+
+I think 
+what I am going to try is give a bit the three variable's prior's a bigger std. I think this should make them more dominant and maybe that will fix? 
+    but im not sure
+
+
+So i did a case where I kept my prior means the same, but doubled the size of my STD for each priors
+    it didnt really help
+Gonna do one more test just for fun and see if changing the prior mean will help too
+This did not help. not sure what the issue is then 
+
+
+
+Disregard all the stuff above:
+
+So one of the big issues was that I was not even for my dHtdx function i wasnt updating my combustion_end 
+
+After that my chains started to freeze/slow down a lot. 
+This is more or less happening because when i bracket and find a scale for which my choke location is at my throat location I end up choking like 0.000248% or a number around 
+before the actual choke point.
+
+I basically just added a thing to my elif statement in my solver func that says 
+elif acceptedScale == True and postThroatSolve == True and (geometry_regions(xCurrent) == "Throat" or (MCurrent >= 0.99 and xCurrent < throat_loc))
+This basically means that I have found my scale and i am solving past the throat 
+and if i am either at the throat or my mach number is > 0.99 and i am a small amount before the throat then i am good to do the sonic jump 
