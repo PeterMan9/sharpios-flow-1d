@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 cases = [
-    "5_param_LTune",
+    "5_Param_cePrior",
 ]
 
 def run_case(CaseName):

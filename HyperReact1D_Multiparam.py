@@ -42,7 +42,7 @@ def smoothstep(xi):
 def geometry_regions(x):
     if x <= preburner_length:
         return "Preburner"
-    elif throat_loc <= x <= throat_loc + 0.001: 
+    elif throat_loc - 0.0005 <= x <= throat_loc + 0.0009: 
         return "Throat"
     elif x <= throat_loc:
         return "Conv Nozzle"
@@ -524,7 +524,7 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end,bl_h,bl_grow
         h_max = 1e-1
     elif location == "Conv Nozzle" or location == "Div Nozzle":
         local_tol = 1e-6
-        h_max =5e-3
+        h_max =1e-3
     elif location == "Throat":
         local_tol = 1e-8
         h_max = 1e-4
@@ -546,8 +546,7 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end,bl_h,bl_grow
         if h < 1e-14:
             raise RuntimeError(f"RK45 step size got too small at x = {x:.4f}")
             
-        mdot_Current = mdotFuncX(x)
-        mdot_Prev = mdotFuncX(x-h)
+        
         x1 = x
         Cf1 = cf_location(x1,Cf_dnz)
         A1 = geom_Area(x1,bl_h,bl_growth)
@@ -560,10 +559,11 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end,bl_h,bl_grow
         except:
             h *= 0.5
             continue
-
+        mdot_1Cur = mdotFuncX(x1)
+        mdot_1Prev = mdotFuncX(x-h)  
         M1 = mNum(V1,a1)
-        k1V = h * dVdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf1,x1,h,eta_total,combustion_end,bl_h,bl_growth)
-        k1P = h * dPdX(V1,A1,M1,T1,P1,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x1,x1-h),Cf1,x1,h,eta_total,combustion_end,bl_h,bl_growth)
+        k1V = h * dVdX(V1,A1,M1,T1,P1,mdot_1Cur,delMdotdx(mdot_1Cur,mdot_1Prev,x1,x1-h),Cf1,x1,h,eta_total,combustion_end,bl_h,bl_growth)
+        k1P = h * dPdX(V1,A1,M1,T1,P1,mdot_1Cur,delMdotdx(mdot_1Cur,mdot_1Prev,x1,x1-h),Cf1,x1,h,eta_total,combustion_end,bl_h,bl_growth)
 
         x2 = x1 + 1/5 * h
         Cf2 = cf_location(x2,Cf_dnz)
@@ -577,8 +577,10 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end,bl_h,bl_grow
             h *= 0.5
             continue
         M2 = mNum(V2,a2)
-        k2V = h * dVdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,combustion_end,bl_h,bl_growth)
-        k2P = h * dPdX(V2,A2,M2,T2,P2,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,combustion_end,bl_h,bl_growth)
+        mdot_2Cur = mdotFuncX(x2)
+        mdot_2Prev = mdotFuncX(x1) 
+        k2V = h * dVdX(V2,A2,M2,T2,P2,mdot_2Cur,delMdotdx(mdot_2Cur,mdot_2Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,combustion_end,bl_h,bl_growth)
+        k2P = h * dPdX(V2,A2,M2,T2,P2,mdot_2Cur,delMdotdx(mdot_2Cur,mdot_2Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,combustion_end,bl_h,bl_growth)
 
         x3 = x1 + 3/10 * h
         Cf3 = cf_location(x3,Cf_dnz)
@@ -593,8 +595,10 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end,bl_h,bl_grow
             h *= 0.5
             continue
         M3 = mNum(V3,a3)
-        k3V = h * dVdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf3,x3,3/10 * h,eta_total,combustion_end,bl_h,bl_growth)
-        k3P = h * dPdX(V3,A3,M3,T3,P3,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x3,x1),Cf3,x3,3/10 * h,eta_total,combustion_end,bl_h,bl_growth)
+        mdot_3Cur = mdotFuncX(x3)
+        mdot_3Prev = mdotFuncX(x1) 
+        k3V = h * dVdX(V3,A3,M3,T3,P3,mdot_3Cur,delMdotdx(mdot_3Cur,mdot_3Prev,x3,x2),Cf3,x3,3/10 * h,eta_total,combustion_end,bl_h,bl_growth)
+        k3P = h * dPdX(V3,A3,M3,T3,P3,mdot_3Cur,delMdotdx(mdot_3Cur,mdot_3Prev,x3,x2),Cf3,x3,3/10 * h,eta_total,combustion_end,bl_h,bl_growth)
 
         x4 = x1 + 4/5 * h
         Cf4 = cf_location(x4,Cf_dnz)
@@ -609,8 +613,10 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end,bl_h,bl_grow
             h *= 0.5
             continue
         M4 = mNum(V4,a4)
-        k4V = h * dVdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf4,x4,4/5 * h,eta_total,combustion_end,bl_h,bl_growth)
-        k4P = h * dPdX(V4,A4,M4,T4,P4,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x4,x1),Cf4,x4,4/5 * h,eta_total,combustion_end,bl_h,bl_growth)
+        mdot_4Cur = mdotFuncX(x4)
+        mdot_4Prev = mdotFuncX(x1) 
+        k4V = h * dVdX(V4,A4,M4,T4,P4,mdot_4Cur,delMdotdx(mdot_4Cur,mdot_4Prev,x4,x3),Cf4,x4,4/5 * h,eta_total,combustion_end,bl_h,bl_growth)
+        k4P = h * dPdX(V4,A4,M4,T4,P4,mdot_4Cur,delMdotdx(mdot_4Cur,mdot_4Prev,x4,x3),Cf4,x4,4/5 * h,eta_total,combustion_end,bl_h,bl_growth)
 
         x5 = x1 + 8/9 * h
         Cf5 = cf_location(x5,Cf_dnz)
@@ -626,8 +632,10 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end,bl_h,bl_grow
             continue
 
         M5 = mNum(V5,a5)
-        k5V = h * dVdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,combustion_end,bl_h,bl_growth)
-        k5P = h * dPdX(V5,A5,M5,T5,P5,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,combustion_end,bl_h,bl_growth)
+        mdot_5Cur = mdotFuncX(x5)
+        mdot_5Prev = mdotFuncX(x1) 
+        k5V = h * dVdX(V5,A5,M5,T5,P5,mdot_5Cur,delMdotdx(mdot_5Cur,mdot_5Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,combustion_end,bl_h,bl_growth)
+        k5P = h * dPdX(V5,A5,M5,T5,P5,mdot_5Cur,delMdotdx(mdot_5Cur,mdot_5Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,combustion_end,bl_h,bl_growth)
 
         x6 = x1 + h
         Cf6 = cf_location(x6,Cf_dnz)
@@ -642,8 +650,10 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end,bl_h,bl_grow
             continue
 
         M6 = mNum(V6,a6)
-        k6V = h * dVdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf6,x6,h,eta_total,combustion_end,bl_h,bl_growth)
-        k6P = h * dPdX(V6,A6,M6,T6,P6,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x6,x1),Cf6,x6,h,eta_total,combustion_end,bl_h,bl_growth)
+        mdot_6Cur = mdotFuncX(x6)
+        mdot_6Prev = mdotFuncX(x1) 
+        k6V = h * dVdX(V6,A6,M6,T6,P6,mdot_6Cur,delMdotdx(mdot_6Cur,mdot_6Prev,x6,x1),Cf6,x6,h,eta_total,combustion_end,bl_h,bl_growth)
+        k6P = h * dPdX(V6,A6,M6,T6,P6,mdot_6Cur,delMdotdx(mdot_6Cur,mdot_6Prev,x6,x1),Cf6,x6,h,eta_total,combustion_end,bl_h,bl_growth)
 
         #5th order solution 
         v_5Order = V + 35/384 * k1V + 500/1113 * k3V + 125/192 * k4V - 2187/6784 * k5V + 11/84 * k6V
@@ -661,8 +671,10 @@ def rk45Step(V,P,Cf_dnz, h, x, T_preburner,eta_total,combustion_end,bl_h,bl_grow
             h *= 0.5
             continue       
         M7 = mNum(V7,a7)
-        k7V = h * dVdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf7,x7,h,eta_total,combustion_end,bl_h,bl_growth)
-        k7P = h * dPdX(V7,A7,M7,T7,P7,mdot_Current,delMdotdx(mdot_Current,mdot_Prev,x7,x1),Cf7,x7,h,eta_total,combustion_end,bl_h,bl_growth)
+        mdot_7Cur = mdotFuncX(x7)
+        mdot_7Prev = mdotFuncX(x1) 
+        k7V = h * dVdX(V7,A7,M7,T7,P7,mdot_7Cur,delMdotdx(mdot_7Cur,mdot_7Prev,x7,x1),Cf7,x7,h,eta_total,combustion_end,bl_h,bl_growth)
+        k7P = h * dPdX(V7,A7,M7,T7,P7,mdot_7Cur,delMdotdx(mdot_7Cur,mdot_7Prev,x7,x1),Cf7,x7,h,eta_total,combustion_end,bl_h,bl_growth)
 
         #4th order solution
         v_4Order = V + 5179/57600 * k1V + 7571/16695 * k3V + 393/640 * k4V - 92097/339200 * k5V + 187/2100 * k6V + 1/40 * k7V
@@ -770,8 +782,11 @@ def solver(Preburner_TStag,Cf_dnz,eta_total,combustion_end,bl_h,bl_growth,scale,
                 f"x={xList[-1]}, nozzle_exit={nozzle_exit},\n"
                 f"h={stepList[-1]},\n "
                 f"M={machNum[-1]},\n"
+                f"V={velocities[-1]},\n"
                 f"P={pressure[-1]},\n"
                 f"T={temp[-1]},\n"
+                f"Area={geom_Area(xList[-1],bl_h,bl_growth)},\n"
+                f"dAdx={dAdx(xList[-1],bl_h,bl_growth)},\n"
                 f"location={geometry_regions(xList[-1])},\n"
                 f"acceptedScale={acceptedScale},\n"
                 f"postThroatSolve={postThroatSolve},\n"
@@ -779,7 +794,10 @@ def solver(Preburner_TStag,Cf_dnz,eta_total,combustion_end,bl_h,bl_growth,scale,
                 f"eta_total={eta_total},\n"
                 f"combustion_end={combustion_end},\n"
                 f"bl_h={bl_h},\n"
-                f"bl_growth={bl_growth}\n" )#actual for loop for solving everything. from start of preburner to throat 
+                f"bl_growth={bl_growth}\n")
+                
+        
+
 
         xPrev = xList[-1]     
         hPrev = stepList[-1] #from step 0 to step 1 and then step 1 to step 2 etc 
@@ -787,7 +805,7 @@ def solver(Preburner_TStag,Cf_dnz,eta_total,combustion_end,bl_h,bl_growth,scale,
         Vbefore = velocities[-1]
         Pbefore = pressure[-1]
         Tbefore = temp [-1]
-
+        
         xNext, VCurrent, PCurrent, TCurrent, hNext, location = rk45Step(Vbefore,Pbefore,Cf_dnz,hPrev, xPrev,Tbefore,eta_total,combustion_end,bl_h,bl_growth)
 
 
@@ -847,12 +865,12 @@ def solver(Preburner_TStag,Cf_dnz,eta_total,combustion_end,bl_h,bl_growth,scale,
         if MCurrent > 0.99 and postThroatSolve == False:
             break
 
-        elif acceptedScale == True and postThroatSolve == True and (geometry_regions(xCurrent) == "Throat" or (MCurrent >= 0.99 and xCurrent < throat_loc)):
+        elif acceptedScale == True and postThroatSolve == True and (geometry_regions(xCurrent) == "Throat" or (MCurrent >= 0.99 and xCurrent  < throat_loc)):
             throatP = pressure[-1]
             throatT = temp[-1]
             throatPstag = pStag[-1]
             throatTstag = tStag[-1]
-            MachN = 1.001
+            MachN = 1.005
             throatMix_properties = gas_properties(throatT, throatP,Y_mix)
             throatMix_gamma = throatMix_properties["gamma"]
             entropy_throat = throatMix_properties["s"]
@@ -876,6 +894,7 @@ def solver(Preburner_TStag,Cf_dnz,eta_total,combustion_end,bl_h,bl_growth,scale,
             entropy.append(entropy_throat)
             areaList.append(geom_Area(xEndofThroat,bl_h,bl_growth))
             dAdxList.append(dAdx(xEndofThroat,bl_h,bl_growth))
+
             pt_P, pt_x = pressureTap(xList[-2],pressure[-2],xEndofThroat, P_new,PT_locations)
             if pt_P is not None:
 
@@ -902,7 +921,7 @@ def solver(Preburner_TStag,Cf_dnz,eta_total,combustion_end,bl_h,bl_growth,scale,
     mdotReconsturcted_List = np.array(mdotReconstructed)
     mdot_List = mdotList
     entropy_List = np.array(entropy)
-
+    
     return {
         "velocity": V_List,
         "pressure": P_List,
@@ -1113,6 +1132,21 @@ def generatingTrueValues(True_Cf_dNz,True_eta_total,True_combustion_end,True_thr
         high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf_dNz,True_eta_total,True_combustion_end,True_bl_Y,True_bl_growth) #finding bracket 
         final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf_dNz,True_eta_total,True_combustion_end,True_bl_Y,True_bl_growth)   # finding exact scale 
         resultsAtCorrectScale = solver(TstagA,True_Cf_dNz,True_eta_total,True_combustion_end,True_bl_Y,True_bl_growth,final_scale,True,True) #getting exact values at correct scale 
+        plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["Area"])
+        plt.xlabel("X (m)")
+        plt.ylabel("Area (m^2)")
+        plt.title("Area vs X")
+        plt.grid()
+        plt.savefig("Area_vs_X.png")  # Saves to the remote workspace
+        plt.close()
+
+        plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["Mach"])
+        plt.xlabel("X (m)")
+        plt.ylabel("Mach Number")
+        plt.title("Mach Number vs X")
+        plt.grid()
+        plt.savefig("Mach_vs_X.png")  # Saves to the remote workspace
+        plt.close()
 
         true_PTPressure = resultsAtCorrectScale["PT_P"]
         return true_PTPressure
@@ -1262,7 +1296,7 @@ def run_MCMC_case(caseConfig):
             prior_eta_Total = pm.TruncatedNormal("eta_Total", mu=set_eta_Total_Prior_mu, sigma = set_eta_Total_Prior_sigma, 
                                                  lower = 0, upper = 1,initval=set_eta_Total_Prior_mu, default_transform=None)
             prior_combustion_end = pm.TruncatedNormal("combustion_end", mu=set_combustion_end_Prior_mu, sigma = set_combustion_end_Prior_sigma, 
-                                                      lower = x_react,upper = 0.5,initval=set_combustion_end_Prior_mu, default_transform=None)
+                                                      lower = x_react,upper = 0.625,initval=set_combustion_end_Prior_mu, default_transform=None)
             prior_throat_obstruction = pm.TruncatedNormal("throat_obstruction", mu=set_throat_obstruction_Prior_mu, sigma = set_throat_obstruction_Prior_sigma, 
                                                           lower = 0.05, upper = 0.25,initval=set_throat_obstruction_Prior_mu, default_transform=None)
             prior_bl_growth = pm.TruncatedNormal("bl_growth", mu=set_bl_growth_Prior_mu, sigma = set_bl_growth_Prior_sigma,
@@ -1491,9 +1525,9 @@ if __name__ == "__main__":
 
     parameters = {
         "Cf_dNz": {
-            "true": 0.007,
-            "prior_mu": 0.007 * 0.95,
-            "prior_sigma": 0.007 * 0.05,
+            "true": 0.006,
+            "prior_mu": 0.006 * 0.95,
+            "prior_sigma": 0.006 * 0.05,
             "scale": 0.001,
             "scaling": 0.05,
         },
@@ -1505,15 +1539,15 @@ if __name__ == "__main__":
             "scaling": 0.5,
             },
         "combustion_end"  :{
-            "true": preburner_length,
-            "prior_mu": preburner_length * 0.95,
-            "prior_sigma": preburner_length * 0.5,
+            "true": 0.42,
+            "prior_mu": 0.55 * 0.90,
+            "prior_sigma": 0.55 * 0.1,
             "scale": 0.1,
             "scaling": 0.1,
         },
         "throat_obstruction" : {
-            "true": 0.15,
-            "prior_mu": 0.15 * 0.95,
+            "true": 0.10,
+            "prior_mu": 0.10 * 0.95,
             "prior_sigma": 0.15 * 0.05,
             "scale": 0.01,
             "scaling": 0.01,
@@ -1528,12 +1562,12 @@ if __name__ == "__main__":
     }
     
     all_cases = {    
-        "5_param_LTune": {
-            "Case_Name": "5_param_LTune",
+        "5_Param_cePrior": {
+            "Case_Name": "5_Param_cePrior",
             "Parameters": ["Cf_dNz", "eta_Total","combustion_end","throat_obstruction","bl_growth"],
 
-            "Draws" : 10000,
-            "Tune" : 1000,
+            "Draws" : 2000,
+            "Tune" : 500,
             "Chains" : 12 ,
             "Cores" : 12
             }, 
