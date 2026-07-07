@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 cases = [
-    "5_Param_cePrior",
+    "5p_noisyData_LongRun",
 ]
 
 def run_case(CaseName):

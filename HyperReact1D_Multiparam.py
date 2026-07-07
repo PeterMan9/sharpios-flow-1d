@@ -1132,6 +1132,7 @@ def generatingTrueValues(True_Cf_dNz,True_eta_total,True_combustion_end,True_thr
         high_scale,low_scale,high_res, low_res = scaling_InletPressure_NOTPar(True_Cf_dNz,True_eta_total,True_combustion_end,True_bl_Y,True_bl_growth) #finding bracket 
         final_scale,final_res = scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,True_Cf_dNz,True_eta_total,True_combustion_end,True_bl_Y,True_bl_growth)   # finding exact scale 
         resultsAtCorrectScale = solver(TstagA,True_Cf_dNz,True_eta_total,True_combustion_end,True_bl_Y,True_bl_growth,final_scale,True,True) #getting exact values at correct scale 
+        '''
         plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["Area"])
         plt.xlabel("X (m)")
         plt.ylabel("Area (m^2)")
@@ -1147,9 +1148,25 @@ def generatingTrueValues(True_Cf_dNz,True_eta_total,True_combustion_end,True_thr
         plt.grid()
         plt.savefig("Mach_vs_X.png")  # Saves to the remote workspace
         plt.close()
+        '''
+        rng = np.random.default_rng(42)
+
 
         true_PTPressure = resultsAtCorrectScale["PT_P"]
-        return true_PTPressure
+        pt_noise = rng.normal(0, 0.01 * true_PTPressure,true_PTPressure.shape)  
+        true_noisy_PTPressure = true_PTPressure + pt_noise
+
+        plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["pressure"] * 1e-6,'k-', label='FM Pressure (MPa)')
+        plt.plot(resultsAtCorrectScale["PT_X"], true_noisy_PTPressure * 1e-6, 'ro', label='Noisy PT Pressure (MPa)')
+        plt.plot(resultsAtCorrectScale["PT_X"], true_PTPressure * 1e-6, 'bo', label='True PT Pressure (MPa)')
+        plt.xlabel("X (m)")
+        plt.ylabel("Pressure (MPa)")
+        plt.title("Pressure vs X")  
+        plt.legend()
+        plt.grid()
+        plt.savefig("1per_PTPressure_noisy_notNoisy_vs_X.png")  # Saves to the remote workspace
+        plt.close()
+        return true_noisy_PTPressure
     except Exception as e:
         print(f"Failed to Gen True Values because of {e}")
         raise
@@ -1460,63 +1477,74 @@ def run_MCMC_case(caseConfig):
     running_mean_throat_obstruction = np.cumsum(throat_obstruction_samples) / np.arange(1, len(throat_obstruction_samples) + 1)
     running_mean_bl_growth = np.cumsum(bl_growth_samples) / np.arange(1, len(bl_growth_samples) + 1)
 
-    #initialize a side-by-side figure layout (1 row, 4 columns)
-    fig, axs = plt.subplots(1, 5, figsize=(20, 5))
+    fig, axs = plt.subplots(1, 5,figsize=(17, 4),constrained_layout=True)
 
-    # Cf_div Nozzle
-    axs[0].plot(running_mean_cf_dNz, color="steelblue", label="Running mean")
-    axs[0].axhline(set_True_Cf_dNz, color="red", linestyle="--", linewidth=1.5, label=f"True Diverging Nozzle Cf = {set_True_Cf_dNz}")
-    axs[0].set_xlabel("Sample", fontsize=8)
-    axs[0].set_ylabel("Cf_dNz", fontsize=8)
-    axs[0].set_title(f"Running Mean \u2014 Friction Coefficient | {nameofCase}", fontsize=8)
-    axs[0].legend(fontsize=10)
-    axs[0].grid(True, alpha=0.4)
+    plots = [
+        (running_mean_cf_dNz, set_True_Cf_dNz, "Cf_dNz", "Friction Coefficient", "steelblue"),
+        (running_mean_throat_obstruction, set_True_throat_obstruction, "Throat Obstruction", "Throat Obstruction", "steelblue"),
+        (running_mean_eta_Total, set_True_eta_Total, "η_Total", "Combustion Efficiency", "darkorange"),
+        (running_mean_combustion_end, set_True_combustion_end, "combustion_end", "Combustion End Location", "darkorange"),
+        (running_mean_bl_growth, set_True_bl_growth, "bl_growth", "Boundary Layer Growth", "darkorange"),]
+    for ax, (running_mean, true_val, ylabel, title, color) in zip(axs, plots):
+        ax.plot(running_mean, color=color, linewidth=1.4, label="Running mean")
+        ax.axhline(true_val,color="red",linestyle="--",linewidth=1.2,label=f"True = {true_val:g}")
 
-    #throat obstruction percentage 
-    axs[1].plot(running_mean_throat_obstruction, color="steelblue", label="Running mean")
-    axs[1].axhline(set_True_throat_obstruction, color="red", linestyle="--", linewidth=1.5, label=f"True Throat Obstruction Pecentage = {set_True_throat_obstruction}")
-    axs[1].set_xlabel("Sample", fontsize=8)
-    axs[1].set_ylabel("Throat Obstruction", fontsize=8)
-    axs[1].set_title(f"Running Mean \u2014 Throat Obstruction Pecentage | {nameofCase}", fontsize=8)
-    axs[1].legend(fontsize=10)
-    axs[1].grid(True, alpha=0.4)
+        ax.set_title(title, fontsize=9)
+        ax.set_xlabel("Sample", fontsize=8)
+        ax.set_ylabel(ylabel, fontsize=8)
+        ax.tick_params(axis="both", labelsize=8)
+        ax.grid(True, alpha=0.25)
+        ax.legend(fontsize=7, frameon=True, loc="best")
 
-    # Combustion Eff
-    axs[2].plot(running_mean_eta_Total, color="darkorange", label="Running mean")
-    axs[2].axhline(set_True_eta_Total, color="red", linestyle="--", linewidth=1.5, label=f"True \u03b7 = {set_True_eta_Total}")
-    axs[2].set_xlabel("Sample", fontsize=8)
-    axs[2].set_ylabel("\u03b7_Total", fontsize=8)
-    axs[2].set_title(f"Running Mean \u2014 Combustion Efficiency | {nameofCase}", fontsize=8)
-    axs[2].legend(fontsize=10)
-    axs[2].grid(True, alpha=0.4)
-
-    # combustion_end
-    axs[3].plot(running_mean_combustion_end, color="darkorange", label="Running mean")
-    axs[3].axhline(set_True_combustion_end, color="red", linestyle="--", linewidth=1.5, label=f"True x = {set_True_combustion_end}")
-    axs[3].set_xlabel("Sample", fontsize=8)
-    axs[3].set_ylabel("combustion_end", fontsize=8)
-    axs[3].set_title(f"Running Mean of Combustion End Location | {nameofCase}", fontsize=8)
-    axs[3].legend(fontsize=10)
-    axs[3].grid(True, alpha=0.4)
-
-    # Bl Growth
-    axs[4].plot(running_mean_bl_growth, color="darkorange", label="Running mean")
-    axs[4].axhline(set_True_bl_growth, color="red", linestyle="--", linewidth=1.5, label=f"True x = {set_True_bl_growth}")
-    axs[4].set_xlabel("Sample", fontsize=8)
-    axs[4].set_ylabel("bl_growth", fontsize=8)
-    axs[4].set_title(f"Running Mean of Boundary Layer Growth | {nameofCase}", fontsize=8)
-    axs[4].legend(fontsize=10)
-    axs[4].grid(True, alpha=0.4)
-
-    plt.tight_layout()
-    plt.savefig(case_folder / f"Combined_Metrics_{nameofCase}_Running_mean.png", dpi=200, bbox_inches='tight')
+    fig.suptitle(f"Running Means | {nameofCase}", fontsize=11)
+    plt.savefig(case_folder / f"Combined_Running_mean_{nameofCase}.png",dpi=220,bbox_inches="tight")
     plt.close(fig)
 
-    az.plot_pair(trace,var_names= ["Cf_dNz","eta_Total","combustion_end","throat_obstruction","bl_growth"])
-    plt.suptitle("Joint Posterior", y = 1.02)
-    plt.tight_layout()
-    plt.savefig(case_folder / f"PairPlot_{nameofCase}.png", dpi=150, bbox_inches = "tight")
-    plt.close()
+    pair_vars = [
+    "Cf_dNz",
+    "eta_Total",
+    "combustion_end",
+    "throat_obstruction",
+    "bl_growth",
+    ]
+
+    pair_samples = {
+        var: trace.posterior[var].values.flatten()
+        for var in pair_vars
+    }
+
+    n = len(pair_vars)
+    fig, axs = plt.subplots(n, n, figsize=(11, 11))
+
+    for i, yvar in enumerate(pair_vars):
+        for j, xvar in enumerate(pair_vars):
+            ax = axs[i, j]
+
+            x = pair_samples[xvar]
+            y = pair_samples[yvar]
+
+            if i == j:
+                ax.hist(x, bins=45, color="steelblue", alpha=0.85, density=True)
+            elif i > j:
+                ax.hexbin(x,y,gridsize=35,cmap="viridis",mincnt=1,linewidths=0.0,)
+            else:
+                ax.axis("off")
+
+            if i == n - 1:
+                ax.set_xlabel(xvar, fontsize=8)
+            else:
+                ax.set_xticklabels([])
+            if j == 0 and i > 0:
+                ax.set_ylabel(yvar, fontsize=8)
+            elif j != 0:
+                ax.set_yticklabels([])
+            ax.tick_params(axis="both", labelsize=7)
+            ax.grid(False)
+
+    fig.suptitle(f"Joint Posterior Density | {nameofCase}", fontsize=13, y=0.995)
+    fig.tight_layout()
+    plt.savefig(case_folder / f"PairPlot_{nameofCase}.png",dpi=220,bbox_inches="tight",)
+    plt.close(fig)
 
 #cases and running model 
 if __name__ == "__main__":
@@ -1533,22 +1561,22 @@ if __name__ == "__main__":
         },
         "eta_Total": {
             "true": 0.8,
-            "prior_mu": 0.8 * 0.90,
-            "prior_sigma": 0.8 * 0.1,
+            "prior_mu": 0.8 * 0.95,
+            "prior_sigma": 0.8 * 0.05,
             "scale": 0.1,
             "scaling": 0.5,
             },
         "combustion_end"  :{
             "true": 0.42,
-            "prior_mu": 0.55 * 0.90,
-            "prior_sigma": 0.55 * 0.1,
+            "prior_mu": 0.55,
+            "prior_sigma": 0.55 * 0.175,
             "scale": 0.1,
             "scaling": 0.1,
         },
         "throat_obstruction" : {
             "true": 0.10,
-            "prior_mu": 0.10 * 0.95,
-            "prior_sigma": 0.15 * 0.05,
+            "prior_mu": 0.10 * 1.05,
+            "prior_sigma": 0.10 * 0.05,
             "scale": 0.01,
             "scaling": 0.01,
         },
@@ -1562,19 +1590,18 @@ if __name__ == "__main__":
     }
     
     all_cases = {    
-        "5_Param_cePrior": {
-            "Case_Name": "5_Param_cePrior",
+        "5p_noisyData_LongRun": {
+            "Case_Name": "5p_noisyData_LongRun",
             "Parameters": ["Cf_dNz", "eta_Total","combustion_end","throat_obstruction","bl_growth"],
 
-            "Draws" : 2000,
-            "Tune" : 500,
+            "Draws" : 10000,
+            "Tune" : 1000,
             "Chains" : 12 ,
             "Cores" : 12
             }, 
     }
 
     for case_name, case_data in all_cases.items():
-        # It reads each string inside the "Parameters" list
         for param in case_data["Parameters"]:
             if param in parameters:
                 # Grabs the specific nested keys and writes them to your flat setup
@@ -1587,3 +1614,4 @@ if __name__ == "__main__":
         case = all_cases[case_name]
 
     run_MCMC_case(case)
+ 
