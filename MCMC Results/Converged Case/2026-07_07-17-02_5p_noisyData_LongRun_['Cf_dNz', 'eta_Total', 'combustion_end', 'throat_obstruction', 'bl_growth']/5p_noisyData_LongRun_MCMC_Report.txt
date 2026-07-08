@@ -1,0 +1,49 @@
+Parameters Included in Model = ['Cf_dNz', 'eta_Total', 'combustion_end', 'throat_obstruction', 'bl_growth']
+5p_noisyData_LongRun Values 
+
+True Diverging Nozzle Cf = 0.006
+Diverging Nozzle Cf Prior Mean = 0.0057
+Diverging Nozzle Cf Prior Sigma = 0.00030000000000000003
+Diverging Nozzle Cf Scale = 0.001
+Diverging Nozzle Cf Scaling = 0.05
+
+True Eta Total = 0.8
+Eta Total Prior Mean = 0.76
+Eta Total Prior Sigma = 0.04000000000000001
+Eta Total Scale = 0.1
+Eta Total Scaling = 0.5
+
+True Combustion End = 0.42
+Combustion End Prior Mean = 0.55
+Combustion End Prior Sigma = 0.09625
+Combustion End Scale = 0.1
+Combustion End Scaling = 0.1
+
+True Throat Obstruction Pecentage = 0.1
+Throat Obstruction Pecentage Prior Mean = 0.10500000000000001
+Throat Obstruction Pecentage Prior Sigma = 0.005000000000000001
+Throat Obstruction Pecentage Scale = 0.01
+Throat Obstruction Pecentage Scaling = 0.01
+
+True Boundary Layer Growth = 10
+Boundary Layer Growth Prior Mean = 9.5
+Boundary Layer Growth Prior Sigma = 0.5
+Boundary Layer Growth Scale = 1
+Boundary Layer Growth Scaling = 0.01
+
+ARVIZ Summary
+---------------------
+                       mean       sd eti89_lb eti89_ub  ess_bulk  ess_tail r_hat mcse_mean  mcse_sd
+Cf_dNz              0.00587  0.00027   0.0054   0.0063       197       278  1.05   1.9e-05  1.3e-05
+eta_Total             0.785    0.036     0.73     0.84       708      1481  1.02    0.0014  0.00095
+combustion_end        0.432     0.03     0.38     0.48       723      1346  1.02    0.0011  0.00079
+throat_obstruction   0.1072   0.0045      0.1     0.11        94       286  1.09   0.00044  0.00035
+bl_growth              9.76     0.32      9.3       10        73        73  1.11     0.036    0.025
+Other Results and metrics 
+Acceptance Rate: 0.14778333333333332
+
+Settings:
+Draws = 10000
+Tune = 1000
+Chains = 12
+Cores = 12

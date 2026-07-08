@@ -1575,7 +1575,7 @@ if __name__ == "__main__":
         },
         "throat_obstruction" : {
             "true": 0.10,
-            "prior_mu": 0.10 * 1.05,
+            "prior_mu": 0.10 * 0.95,
             "prior_sigma": 0.10 * 0.05,
             "scale": 0.01,
             "scaling": 0.01,
@@ -1590,11 +1590,11 @@ if __name__ == "__main__":
     }
     
     all_cases = {    
-        "5p_noisyData_LongRun": {
-            "Case_Name": "5p_noisyData_LongRun",
+        "5p_noisyData_LRun": {
+            "Case_Name": "5p_noisyData_LRun",
             "Parameters": ["Cf_dNz", "eta_Total","combustion_end","throat_obstruction","bl_growth"],
 
-            "Draws" : 10000,
+            "Draws" : 7500,
             "Tune" : 1000,
             "Chains" : 12 ,
             "Cores" : 12
@@ -1614,4 +1614,5 @@ if __name__ == "__main__":
         case = all_cases[case_name]
 
     run_MCMC_case(case)
+
  
