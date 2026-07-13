@@ -1178,9 +1178,9 @@ def likelihoodPlotting(Cf_dNz, eta_total, combustion_end,throat_obstruction,bl_g
     logplist = []
     count = 0 
     
-    MovingVar = throat_obstruction
+    MovingVar = combustion_end
 
-    movingVar_grid = np.linspace(MovingVar - MovingVar * 0.05, MovingVar + MovingVar * 0.05, 50)
+    movingVar_grid = np.linspace(MovingVar - MovingVar * 0.1, MovingVar + MovingVar * 0.1, 100)
 
     True_Cf_dNz = Cf_dNz
     True_eta_Total = eta_total
@@ -1193,7 +1193,7 @@ def likelihoodPlotting(Cf_dNz, eta_total, combustion_end,throat_obstruction,bl_g
 
     for movingvar in movingVar_grid:
         count += 1
-        throat_obstruction = movingvar
+        combustion_end = movingvar
         try:
             bl_Y = bl_height(throat_obstruction)
             high_scale, low_scale, high_res, low_res = scaling_InletPressure_NOTPar(Cf_dNz, eta_total, combustion_end, bl_Y, bl_growth)
@@ -1226,20 +1226,21 @@ def likelihoodPlotting(Cf_dNz, eta_total, combustion_end,throat_obstruction,bl_g
     
     plt.figure()
     plt.plot(movingVar_list,logp_array)
-    plt.xlabel("Values")
+    plt.xlabel("Combustion End Values")
     plt.ylabel("Log Likelihood")
     plt.grid()
-    plt.savefig("throat_obstruction.png")  # Saves to the remote workspace
+    plt.savefig("combustion_end.png")  # Saves to the remote workspace
     plt.close()
 '''
 if __name__ == "__main__":
-    Cf_dNz = 0.007
+    Cf_dNz = 0.006
     eta_total= 0.8
     combustion_end = preburner_length
-    throat_obstruction = 0.1
+    throat_obstruction = 0.30
     bl_growth = 10
     results = likelihoodPlotting(Cf_dNz, eta_total, combustion_end,throat_obstruction,bl_growth)
 '''
+
 #MCMC Model
 
 def run_MCMC_case(caseConfig):
@@ -1297,6 +1298,9 @@ def run_MCMC_case(caseConfig):
 
             case_folder = results_root / run_label
             case_folder.mkdir(exist_ok = True)
+            
+            priors_folder = case_folder / "Priors"
+            priors_folder.mkdir(exist_ok = True)
 
             diagnostics_folder = case_folder / "Diagnostics"
             diagnostics_folder.mkdir(exist_ok = True)
@@ -1322,8 +1326,44 @@ def run_MCMC_case(caseConfig):
             log_like = log_likelihood(prior_Cf_dNz,prior_eta_Total,prior_combustion_end,prior_throat_obstruction,prior_bl_growth,
                                       pt.as_tensor_variable(true_PTPressure, dtype="float64"))
 
+            prior_Cfdnz_samples = pm.draw(prior_Cf_dNz, 10000, random_seed=42)
+            prior_eta_Total_samples = pm.draw(prior_eta_Total, 10000, random_seed=42)
+            prior_combustion_end_samples = pm.draw(prior_combustion_end, 10000, random_seed=42)
+            prior_throat_obstruction_samples = pm.draw(prior_throat_obstruction, 10000, random_seed=42)
+            prior_bl_growth_samples = pm.draw(prior_bl_growth, 10000, random_seed=42)
+
+            plt.hist(prior_Cfdnz_samples, bins=50, density=True)
+            plt.xlabel("Cf Diverging Nozzle")
+            plt.ylabel("Density")
+            plt.savefig(priors_folder / f"Prior_Cf_dNz_{nameofCase}.png", dpi=200)
+            plt.close()
+
+            plt.hist(prior_eta_Total_samples, bins=50, density=True)
+            plt.xlabel("Eta Total")
+            plt.ylabel("Density")
+            plt.savefig(priors_folder / f"Prior_eta_Total_{nameofCase}.png", dpi=200)
+            plt.close()
+
+            plt.hist(prior_combustion_end_samples, bins=50, density=True)
+            plt.xlabel("Combustion End")
+            plt.ylabel("Density")
+            plt.savefig(priors_folder / f"Prior_combustion_end_{nameofCase}.png", dpi=200)
+            plt.close()
+
+            plt.hist(prior_throat_obstruction_samples, bins=50, density=True)
+            plt.xlabel("Throat Obstruction")
+            plt.ylabel("Density")
+            plt.savefig(priors_folder / f"Prior_throat_obstruction_{nameofCase}.png", dpi=200)
+            plt.close()
+
+            plt.hist(prior_bl_growth_samples, bins=50, density=True)
+            plt.xlabel("Bl Growth")
+            plt.ylabel("Density")
+            plt.savefig(priors_folder / f"Prior_bl_growth_{nameofCase}.png", dpi=200)
+            plt.close()
+
             pm.Potential("Error Likelihood",log_like)
-            
+
             step = pm.DEMetropolisZ(
                 vars = [prior_Cf_dNz,prior_eta_Total,prior_combustion_end,prior_throat_obstruction,prior_bl_growth],
                 S= np.array([set_Cf_dNz_scale,set_eta_Total_scale,set_combustion_end_scale,set_throat_obstruction_scale,set_bl_growth_scale]), 
@@ -1429,6 +1469,8 @@ def run_MCMC_case(caseConfig):
             "throat_obstruction" : set_True_throat_obstruction,
             "bl_growth" : set_True_bl_growth
         }
+
+    
 
     for param in summary.index:
         label = param_labels.get(param, param)
@@ -1574,9 +1616,9 @@ if __name__ == "__main__":
             "scaling": 0.1,
         },
         "throat_obstruction" : {
-            "true": 0.10,
-            "prior_mu": 0.10 * 0.95,
-            "prior_sigma": 0.10 * 0.05,
+            "true": 0.20,
+            "prior_mu": 0.20 * 0.95,
+            "prior_sigma": 0.20 * 0.05,
             "scale": 0.01,
             "scaling": 0.01,
         },
@@ -1590,12 +1632,12 @@ if __name__ == "__main__":
     }
     
     all_cases = {    
-        "5p_noisyData_LRun": {
-            "Case_Name": "5p_noisyData_LRun",
+        "5p_nData_highOT": {
+            "Case_Name": "5p_nData_highOT",
             "Parameters": ["Cf_dNz", "eta_Total","combustion_end","throat_obstruction","bl_growth"],
 
-            "Draws" : 7500,
-            "Tune" : 1000,
+            "Draws" : 750,
+            "Tune" : 250,
             "Chains" : 12 ,
             "Cores" : 12
             }, 
@@ -1614,5 +1656,3 @@ if __name__ == "__main__":
         case = all_cases[case_name]
 
     run_MCMC_case(case)
-
- 
