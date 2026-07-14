@@ -1,0 +1,19 @@
+for poster - justified. so text goes to the edge and everything 
+
+graphs are hard to read - maybe a little too small
+	axis and label were too small. so blow them up a bit 
+
+
+kinda of make your own equation for Bl growth
+	Mach num, reynald num, temp
+
+empirical bayes 
+
+build synthetic data 
+build synthetic relation of how BL growth is formed - Reynolds num, Mach Num, and temp (mach num and tempa re 	small corrections)
+try with pressure and temp - synthetic data 
+
+
+then put into your forward model
+
+black box bayes empirical bayes -BEB
