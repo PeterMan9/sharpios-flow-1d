@@ -181,7 +181,8 @@ x_react = 0.0
 #normalized preburner length
 def x_norm(x,combustion_end):
     X = (x - x_react)/(combustion_end - x_react)
-    return X
+    return max(0.0, min(X, 1.0))
+
 
 #mixing eff func 
 def eta(x, eta_total, combustion_end):
