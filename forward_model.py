@@ -11,7 +11,7 @@ gas = ct.Solution('h2_air.yaml')
 
 @dataclass(frozen=True)
 class ModelConfig:
-    geometry_type: Literal["wind_tunnel", "constant_area"] = "wind_tunnel"
+    geometry_type: Literal["wind_tunnel", "constant_area"]
     friction: bool = True
     boundary_layer: bool = True
     combustion: bool = True
@@ -226,28 +226,55 @@ class SmartsModel:
         return dPHI
     #Smarts combustion model heat release with respect to dx 
     def dHtdx(self,x:float, dx:float, eta_total:float, combustion_end:float) -> float:
-        if ModelConfig.combustion:
             return (self.dPHI(x, dx, eta_total, combustion_end) * self.hpr_h2 * self.fst) / dx
-        else:
-            return 0.0
+        
 
 #Tube initial conditions
 @dataclass(frozen=True)
 class TubeInletConditions:
-    T_air :float #K
-    M1 :float
-    P_air:float
+    T_air: float
+    M1: float
+    P_air: float
 
     mdot_i: float
     injMdot: float
     Vinj: float
 
-    Y_mix = Y_air = get_Y("O2:0.21, N2:0.79")
-    R_mix = R_air = gas_properties(T_air, P_air, get_Y("O2:0.21, N2:0.79"))["R_specific"]
+    @property
+    def Y_mix(self) -> np.ndarray:
+        return get_Y("O2:0.21, N2:0.79")
 
-    a1 = soS(T_air, R_air, gas_properties(T_air, P_air, get_Y("O2:0.21, N2:0.79"))["gamma"])
-    TstagAir = T_air * (1 + ((gas_properties(T_air, P_air, get_Y("O2:0.21, N2:0.79"))["gamma"] - 1)/2) * M1**2)
-    Pstag_Air = P_air * (1 + (gas_properties(T_air, P_air, get_Y("O2:0.21, N2:0.79"))["gamma"] - 1)/2 * M1**2)**(gas_properties(T_air, P_air, get_Y("O2:0.21, N2:0.79"))["gamma"]/(gas_properties(T_air, P_air, get_Y("O2:0.21, N2:0.79"))["gamma"]-1))
+    @property
+    def Y_air(self) -> np.ndarray:
+        return self.Y_mix
+
+    @property
+    def R_air(self) -> float:
+        return gas_properties(
+            self.T_air,
+            self.P_air,
+            self.Y_air,
+        )["R_specific"]
+
+    @property
+    def R_mix(self) -> float:
+        return self.R_air
+
+    @property
+    def gamma_air(self) -> float:
+        return gas_properties(self.T_air,self.P_air,self.Y_air,)["gamma"]
+
+    @property
+    def a1(self) -> float:
+        return soS(self.T_air,self.R_air,self.gamma_air,)
+
+    @property
+    def TstagAir(self) -> float:
+        return self.T_air * (1 + (self.gamma_air - 1) / 2 * self.M1**2)
+
+    @property
+    def Pstag_Air(self) -> float:
+        return self.P_air * (1 + (self.gamma_air - 1) / 2 * self.M1**2) ** (self.gamma_air / (self.gamma_air - 1))
 
 
 #HyperReact initial conditions
@@ -272,22 +299,21 @@ class WindTunnelInletConditions:
     M2 :float
     M3 :float
 
-    mdot1_Air :float
-    mdot2_Air :float
-    mdot3_H2 :float
+    mdot_Air :float
+    mdot_H2 :float
 
-    mdotAir = mdot1_Air + mdot2_Air #injector 1 and 2 are the same so can just add them together
-    mdotH2 = mdot3_H2 #big injector
-    mdot_i = mdotAir + mdotH2
+    @property
+    def mdot_i(self):
+        return self.mdot_Air + self.mdot_H2
 
     injMdot: float
     Vinj: float
+    
     @property
     def A_airInjs(self):
         return (np.pi * (self.dir_air/2)**2) 
-    @property
-    def A_H2Injs(self):
-        return (np.pi * (self.d_h2/2/2)**2) 
+    def A_H2Injs(self) -> float:
+        return np.pi * (self.d_h2 / 2)**2
     @property 
     def Y_air(self):
         return get_Y("O2:0.21, N2:0.79")
@@ -296,7 +322,7 @@ class WindTunnelInletConditions:
         return get_Y("H2:1.0")
     @property 
     def Y_mix(self):
-        return Ymix(self.Y_air, self.mdotAir, self.Y_H2, self.mdotH2)
+        return Ymix(self.Y_air, self.mdot_Air, self.Y_H2, self.mdot_H2)
     @property 
     def R_air(self):
         return gas_properties(self.T_air, self.P_air, get_Y("O2:0.21, N2:0.79"))["R_specific"]
@@ -341,7 +367,7 @@ class WindTunnelInletConditions:
         return self.P_H2 * (1 + (gas_properties(self.T_H2, self.P_H2, get_Y("H2:1.0"))["gamma"] - 1)/2 * self.M3**2)**(gas_properties(self.T_H2, self.P_H2, get_Y("H2:1.0"))["gamma"]/(gas_properties(self.T_H2, self.P_H2, get_Y("H2:1.0"))["gamma"]-1))
 
    
-def select_case(config: ModelConfig,geometry,inlet_conditions):
+def select_case(config,geometry,inlet_conditions):
     
     if config.geometry_type == "wind_tunnel":
         if not isinstance(geometry, WindTunnelGeometry):
@@ -369,18 +395,26 @@ def select_case(config: ModelConfig,geometry,inlet_conditions):
     return geometry, inlet_conditions
 
 class ForwardModel:
-    def __init__(
-        self,
-        config: ModelConfig,
-        geometry: WindTunnelGeometry,
-        inlet_conditions: WindTunnelInletConditions,
-        combustion_model: SmartsModel,):
-
+    def __init__(self,config,geometry_case,inlet_conditions,combustion_model: SmartsModel):
         self.config = config
-        self.geometry = geometry
-        self.ICs = inlet_conditions
-        self.combustion_model = combustion_model
         
+        geometry, ICs = select_case(config,geometry_case,inlet_conditions)
+        self.geometry = geometry
+        self.ICs = ICs
+        self.combustion_model = combustion_model
+    
+    def heat_release(self,x:float, dx:float, eta_total:float, combustion_end:float) -> float:
+        if self.config.combustion:
+            return self.combustion_model.dHtdx(x,dx,eta_total,combustion_end)
+        else:
+            return 0.0
+
+    def friction(self, x:float, cf_dnz: float) -> float:
+        if self.config.friction:
+            return self.geometry.cf_location(x,cf_dnz)
+        else:
+            return 0
+
     #using this to track mdot in the potential case that stuff is injected in the pb
     def mdotFuncX (self,x: float) -> float:
         if x < self.geometry.x_injLocation: #pre injector mdot
@@ -402,7 +436,7 @@ class ForwardModel:
         gamma = gas_Prop["gamma"]
 
         term1 = ((-V)/(A * (1 - M**2)))* self.geometry.dAdx(x,bl_h,bl_growth)
-        term2 = ((V/((1-M**2) * cp * T)) * self.combustion_model.dHtdx(x,dx,eta_total,combustion_end))
+        term2 = ((V/((1-M**2) * cp * T)) * self.heat_release(x,dx,eta_total,combustion_end))
         term3 = ((gamma *M**2)/(2 * (1 - M**2)))
         term4 = ((((4 * Cf * V)/self.geometry.Dh(x,bl_h,bl_growth))) - (2*(self.ICs.Vinj/mdot) * dmdotDX))
         term5 = (((V*(1 + gamma * M**2))/((1-M**2)*mdot)) * (dmdotDX))
@@ -415,12 +449,11 @@ class ForwardModel:
         gamma = gas_Prop["gamma"]
 
         term1 = ((gamma * M**2 * P)/(A * (1 - M**2))) * self.geometry.dAdx(x,bl_h,bl_growth)
-        term2 = -(((gamma * M**2 * P)/((1-M**2) * cp * T)) * self.combustion_model.dHtdx(x,dx,eta_total,combustion_end))
+        term2 = -(((gamma * M**2 * P)/((1-M**2) * cp * T)) * self.heat_release(x,dx,eta_total,combustion_end))
         term3  = -((gamma * M**2 * (1 + (gamma-1) * M**2))/(2 * (1 - M**2)))
         term4 = (((4 * Cf * (P/self.geometry.Dh(x,bl_h,bl_growth)))) - (2 * ((self.ICs.Vinj * P)/(mdot * V)) * (dmdotDX)))
         term5 = -(((2 * gamma * M**2 * (1 + ((gamma-1)/2) *M**2)*P)/((1-M**2)*mdot)) * (dmdotDX))
         return term1 + term2 + (term3 * term4) + term5
-
 
     def pressureStagFunc(self,P: float,M: float,gamma: float) -> float:
         Pstag = P * (1 + (gamma - 1)/2 * M**2)**(gamma/(gamma-1))
@@ -442,7 +475,6 @@ class ForwardModel:
         T = Tstag * middleTerm ** (-1)
         return P,T
 
-
     #residual for temp. Basically making sure that my resolved temperature in stuff like rk45 is constrained by my smarts heat release 
     #was havintg the issue that when I was solving for temp in rk45 using ideal gas law i would get massive temps because the variables were
     #just not propely constrained 
@@ -453,7 +485,7 @@ class ForwardModel:
         ht_new = T_gasProperties_new["h"]
         term1 = (ht_new - ht_old)
         term2 = (uNew**2 - uOld**2)/2
-        term3 = self.combustion_model.dHtdx(xOld,dx,eta_total,combustion_end) * dx
+        term3 = self.heat_release(xOld,dx,eta_total,combustion_end) * dx
         return term1 + term2 - term3
 
     def newtonRaphson_T(self,T_Guess: float, T_old: float, xOld: float, uOld: float,
@@ -544,18 +576,15 @@ class ForwardModel:
 
         return P_guess
 
-
-
     #rk45
-
     def rk45Step(self,V: float,P: float,Cf_dnz: float, h: float, x: float, T_preburner: float
                 ,eta_total: float,combustion_end: float,bl_h: float,bl_growth: float) -> tuple[float,float,float,float,float,str]: #add stages for each mdot 3
         accepted = False 
         location = self.geometry.geometry_regions(x)
 
         if location == "Preburner":
-            local_tol = 1e-2
-            h_max = 1e-1
+            local_tol = 5e-2
+            h_max = 1e-2
         elif location == "Conv Nozzle" or location == "Div Nozzle":
             local_tol = 1e-6
             h_max =1e-3
@@ -580,7 +609,7 @@ class ForwardModel:
                 raise RuntimeError(f"RK45 step size got too small at x = {x:.4f}")
                 
             x1 = x
-            Cf1 = self.geometry.cf_location(x1,Cf_dnz)
+            Cf1 = self.friction(x1,Cf_dnz)
             A1 = self.geometry.geom_Area(x1,bl_h,bl_growth)
             V1 = V
             P1 =  P
@@ -599,7 +628,7 @@ class ForwardModel:
             k1P = h * self.dPdX(V1,A1,M1,T1,P1,mdot_1Cur,self.delMdotdx(mdot_1Cur,mdot_1Prev,x1,x1-h),Cf1,x1,h,eta_total,combustion_end,bl_h,bl_growth)
 
             x2 = x1 + 1/5 * h
-            Cf2 = self.geometry.cf_location(x2,Cf_dnz)
+            Cf2 = self.friction(x2,Cf_dnz)
             A2 = self.geometry.geom_Area(x2,bl_h,bl_growth)
             V2 = V + 1/5 * k1V 
             P2 = P + 1/5 * k1P
@@ -616,7 +645,7 @@ class ForwardModel:
             k2P = h * self.dPdX(V2,A2,M2,T2,P2,mdot_2Cur,self.delMdotdx(mdot_2Cur,mdot_2Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,combustion_end,bl_h,bl_growth)
 
             x3 = x1 + 3/10 * h
-            Cf3 = self.geometry.cf_location(x3,Cf_dnz)
+            Cf3 = self.friction(x3,Cf_dnz)
 
             A3 = self.geometry.geom_Area(x3,bl_h,bl_growth)
             V3 = V + 3/40 * k1V + 9/40 * k2V
@@ -634,7 +663,7 @@ class ForwardModel:
             k3P = h *self. dPdX(V3,A3,M3,T3,P3,mdot_3Cur,self.delMdotdx(mdot_3Cur,mdot_3Prev,x3,x2),Cf3,x3,3/10 * h,eta_total,combustion_end,bl_h,bl_growth)
 
             x4 = x1 + 4/5 * h
-            Cf4 = self.geometry.cf_location(x4,Cf_dnz)
+            Cf4 = self.friction(x4,Cf_dnz)
             A4 = self.geometry.geom_Area(x4,bl_h,bl_growth)
 
             V4 = V + 44/45 * k1V - 56/15 * k2V + 32/9 * k3V
@@ -652,7 +681,7 @@ class ForwardModel:
             k4P = h * self.dPdX(V4,A4,M4,T4,P4,mdot_4Cur,self.delMdotdx(mdot_4Cur,mdot_4Prev,x4,x3),Cf4,x4,4/5 * h,eta_total,combustion_end,bl_h,bl_growth)
 
             x5 = x1 + 8/9 * h
-            Cf5 = self.geometry.cf_location(x5,Cf_dnz)
+            Cf5 = self.friction(x5,Cf_dnz)
             A5 = self.geometry.geom_Area(x5,bl_h,bl_growth)
 
             V5 = V + 19372/6561 * k1V - 25360/2187 * k2V + 64448/6561 * k3V - 212/729 * k4V
@@ -672,7 +701,7 @@ class ForwardModel:
             k5P = h * self.dPdX(V5,A5,M5,T5,P5,mdot_5Cur,self.delMdotdx(mdot_5Cur,mdot_5Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,combustion_end,bl_h,bl_growth)
 
             x6 = x1 + h
-            Cf6 = self.geometry.cf_location(x6,Cf_dnz)
+            Cf6 = self.friction(x6,Cf_dnz)
             A6 = self.geometry.geom_Area(x6,bl_h,bl_growth)
 
             V6 = V + 9017/3168 * k1V - 355/33 * k2V + 46732/5247 * k3V + 49/176 * k4V - 5103/18656 * k5V
@@ -695,7 +724,7 @@ class ForwardModel:
             p_5Order = P + 35/384 * k1P + 500/1113 * k3P + 125/192 * k4P - 2187/6784 * k5P + 11/84 * k6P
 
             x7 = x1 + h
-            Cf7 = self.geometry.cf_location(x7,Cf_dnz)
+            Cf7 = self.friction(x7,Cf_dnz)
             A7 = self.geometry.geom_Area(x7,bl_h,bl_growth)
             V7 = v_5Order
             P7 = p_5Order
@@ -743,9 +772,6 @@ class ForwardModel:
                 break
         
         return xNext, Vnext, Pnext, Tnext,h_next, location
-
-
-
 
     #Full Solver
     def solver(self,Preburner_TStag: float,Cf_dnz: float,eta_total: float,combustion_end: float,bl_h: float,
@@ -1117,16 +1143,16 @@ class ForwardModel:
 
         return best_scale, best_res
 
-    def run(self,throat_obstruction: float,Cf_dNz: float,eta_total: float,combustion_end: float,bl_growth: float) -> dict[str, Any]:
+    def run(self,throat_obstruction: float,Cf_dnz: float,eta_total: float,combustion_end: float,bl_growth: float) -> dict[str, Any]:
         
         if self.config.boundary_layer:
             bl_Y = self.geometry.bl_height(throat_obstruction)
             bl_growth = bl_growth
         else:
-            bl_Y = self.geometry.bl_height(0)
+            bl_Y = 0
             bl_growth = 0
 
-        high_scale,low_scale,high_res, low_res = self.scaling_InletPressure_NOTPar(Cf_dNz,eta_total,combustion_end,bl_Y,bl_growth) #finding bracket 
-        final_scale,final_res = self.scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_dNz,eta_total,combustion_end,bl_Y,bl_growth)   # finding exact scale 
-        resultsAtCorrectScale = self.solver(self.ICs.TstagAir,Cf_dNz,eta_total,combustion_end,bl_Y,bl_growth,final_scale,True,True) #getting exact values at correct scale 
+        high_scale,low_scale,high_res, low_res = self.scaling_InletPressure_NOTPar(Cf_dnz,eta_total,combustion_end,bl_Y,bl_growth) #finding bracket 
+        final_scale,final_res = self.scale_HybridNewBisec(low_scale,high_scale, low_res,high_res,Cf_dnz,eta_total,combustion_end,bl_Y,bl_growth)   # finding exact scale 
+        resultsAtCorrectScale = self.solver(self.ICs.TstagAir,Cf_dnz,eta_total,combustion_end,bl_Y,bl_growth,final_scale,True,True) #getting exact values at correct scale 
         return resultsAtCorrectScale
