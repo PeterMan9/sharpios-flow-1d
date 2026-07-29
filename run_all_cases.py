@@ -3,20 +3,19 @@ import subprocess
 import sys
 
 cases = [
-    "5p_nData_highOT",
+    "5p_nData_Long",
 ]
 
 def run_case(CaseName):
     run_cmd = [
         sys.executable,
-        "HyperReact1D_Multiparam.py",
+        "HyperReact1D_MCMC_Model.py",
         CaseName
     ]
 
     subprocess.run(run_cmd,check = True)
 
 if __name__ == "__main__":
-
     with ProcessPoolExecutor(max_workers=12) as executor:
         results = list(executor.map(run_case,cases))
 

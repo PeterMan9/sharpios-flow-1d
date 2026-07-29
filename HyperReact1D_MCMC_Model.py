@@ -39,21 +39,79 @@ geometry = WindTunnelGeometry(
     x_injLocation=0.42 * 0.15,
 )
 
+setup_gas = ct.Solution("h2_air.yaml")
+#just getting all the properties for a given T,P,Y
+def gas_properties(T:float, P:float, Y:float) -> float:
+    setup_gas.TPY = T, P, Y
+    cp = setup_gas.cp_mass
+    h = setup_gas.enthalpy_mass
+    gamma = setup_gas.cp_mass/setup_gas.cv_mass
+    R_specific = setup_gas.cp_mass - setup_gas.cv_mass
+    s = setup_gas.entropy_mass
+    return{
+        "cp": cp,
+        "h": h,
+        "gamma": gamma,
+        "R_specific": R_specific,
+        "s": s
+    }
+
+def get_Y(comp_string: str) -> float:
+    setup_gas.TPX = 300, 101325, comp_string
+    return setup_gas.Y.copy()
+
+#solving for the mass fraction of the mixed gasses 
+def Ymix(YA:float,mdotAir:float, YB:float, mdotH2:float) -> float:
+    Ymix = (mdotAir * YA + mdotH2 * YB)/(mdotAir + mdotH2)
+    return Ymix
+
+T_air = 300.0
+T_H2 = 300.0
+
+P_air = 7.708339e6
+P_H2 = 8.315077e6
+
+M1 = 0.999
+M2 = 0.999
+M3 = 0.999
+
+mdot_Air = 0.4430
+mdot_H2 = 0.003
+
+Y_air = get_Y("O2:0.21, N2:0.79")
+Y_H2 = get_Y("H2:1.0")
+
+Y_mix = Ymix(Y_air,mdot_Air,Y_H2,mdot_H2,)
+
+air_properties = gas_properties(T_air,P_air,Y_air,)
+h2_properties = gas_properties(T_H2,P_H2,Y_H2,)
+
+mix_properties = gas_properties(300.0,ct.one_atm,Y_mix,)
+
+air_inlet_gamma = air_properties["gamma"]
+h2_inlet_gamma = h2_properties["gamma"]
+R_mix = mix_properties["R_specific"]
+Tstag_air = T_air * (1.0+ (air_inlet_gamma - 1.0) / 2.0 * M1**2)
+
 inlet = WindTunnelInletConditions(
-    dir_air=0.229/39.37, #meters
-    d_h2=0.034/39.37,
-    P_air=7.708339*1e6, #Pa
-    P_H2=8.315077*1e6,
-    T_air=300,
-    T_H2=300,
-    M1=0.999,
-    M2=0.999,
-    M3=0.999,
-    mdot_Air=0.4430,
-    mdot_H2=0.003,
-    injMdot=0,
-    Vinj=0,
-)
+    dir_air=0.229 / 39.37,
+    d_h2=0.034 / 39.37,
+    P_air=P_air,
+    P_H2=P_H2,
+    T_air=T_air,
+    T_H2=T_H2,
+    M1=M1,
+    M2=M2,
+    M3=M3,
+    mdot_Air=mdot_Air,
+    mdot_H2=mdot_H2,
+    injMdot=0.0,
+    Vinj=0.0,
+    air_inletGamma=air_inlet_gamma,
+    h2_inletGamma=h2_inlet_gamma,
+    Y_mix=Y_mix,
+    R_mix=R_mix,
+    TstagAir=Tstag_air,)
 
 combustion = SmartsModel(
     hpr_h2=120e6, #J/kg
@@ -63,11 +121,12 @@ combustion = SmartsModel(
     x_react=0.0,
 )
 
-model = ForwardModel(
+forward_model = ForwardModel(
     config=config,
     geometry_case=geometry,
     inlet_conditions=inlet,
     combustion_model=combustion,
+    mechanism="h2_air.yaml"
 )
 #MCMC functions
 #using black box approach 
@@ -75,8 +134,6 @@ model = ForwardModel(
 # wrapper for Op var. basically tells log_likelihood func that i am just putting in a double prec scalar and will
 # output a double precision scalar 
 # this is just so that i can easily pas my prior into my function 
-
-
 @as_op(itypes=[pt.dscalar,pt.dscalar,pt.dscalar,pt.dscalar,pt.dscalar,pt.dvector],otypes=[pt.dscalar]) 
 def log_likelihood(Cf_dnz,eta_total,combustion_end,throat_obstruction,bl_growth,true_PTPressure):    
     Cf_dnz = float(Cf_dnz)
@@ -86,7 +143,7 @@ def log_likelihood(Cf_dnz,eta_total,combustion_end,throat_obstruction,bl_growth,
     bl_growth = float(bl_growth)
 
     try:
-        results = model.run(throat_obstruction,Cf_dnz,eta_total,combustion_end,bl_growth)
+        results = forward_model.run(throat_obstruction,Cf_dnz,eta_total,combustion_end,bl_growth)
 
         Predicted_PTPressure = results["PT_P"]
 
@@ -112,41 +169,11 @@ def log_likelihood(Cf_dnz,eta_total,combustion_end,throat_obstruction,bl_growth,
 
 def generatingTrueValues(True_Cf_dnz,True_eta_total,True_combustion_end,True_throat_obstruction,True_bl_growth):
     try:
-        results = model.run(True_throat_obstruction,True_Cf_dnz,True_eta_total,True_combustion_end,True_bl_growth)
-        '''
-        plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["Area"])
-        plt.xlabel("X (m)")
-        plt.ylabel("Area (m^2)")
-        plt.title("Area vs X")
-        plt.grid()
-        plt.savefig("Area_vs_X.png")  # Saves to the remote workspace
-        plt.close()
-
-        plt.plot(resultsAtCorrectScale["x"], resultsAtCorrectScale["Mach"])
-        plt.xlabel("X (m)")
-        plt.ylabel("Mach Number")
-        plt.title("Mach Number vs X")
-        plt.grid()
-        plt.savefig("Mach_vs_X.png")  # Saves to the remote workspace
-        plt.close()
-        '''
+        results = forward_model.run(True_throat_obstruction,True_Cf_dnz,True_eta_total,True_combustion_end,True_bl_growth)
         rng = np.random.default_rng(42)
-
-
         true_PTPressure = results["PT_P"]
         pt_noise = rng.normal(0, 0.01 * true_PTPressure,true_PTPressure.shape)  
         true_noisy_PTPressure = true_PTPressure + pt_noise
-
-        plt.plot(results["x"], results["pressure"] * 1e-6,'k-', label='FM Pressure (MPa)')
-        plt.plot(results["PT_X"], true_noisy_PTPressure * 1e-6, 'ro', label='Noisy PT Pressure (MPa)')
-        plt.plot(results["PT_X"], true_PTPressure * 1e-6, 'bo', label='True PT Pressure (MPa)')
-        plt.xlabel("X (m)")
-        plt.ylabel("Pressure (MPa)")
-        plt.title("Pressure vs X")  
-        plt.legend()
-        plt.grid()
-        plt.savefig("1per_PTPressure_noisy_notNoisy_vs_X.png")  # Saves to the remote workspace
-        plt.close()
         return true_noisy_PTPressure
     except Exception as e:
         print(f"Failed to Gen True Values because of {e}")
@@ -175,7 +202,7 @@ def likelihoodPlotting(Cf_dnz, eta_total, combustion_end,throat_obstruction,bl_g
         count += 1
         combustion_end = movingvar
         try:
-            results = model.run(throat_obstruction,Cf_dnz,eta_total,combustion_end,bl_growth)
+            results = forward_model.run(throat_obstruction,Cf_dnz,eta_total,combustion_end,bl_growth)
 
 
             Predicted_PTPressure = results["PT_P"]
@@ -346,7 +373,7 @@ def run_MCMC_case(caseConfig):
                 vars = [prior_Cf_dnz,prior_eta_Total,prior_combustion_end,prior_throat_obstruction,prior_bl_growth],
                 S= np.array([set_Cf_dnz_scale,set_eta_Total_scale,set_combustion_end_scale,set_throat_obstruction_scale,set_bl_growth_scale]), 
                 scaling = np.array([set_Cf_dnz_scaling,set_eta_Total_scaling,set_combustion_end_scaling,set_throat_obstruction_scaling,set_bl_growth_scaling]),  #Initial scale factor for how aggressive the sampler noise moves around 
-                tune="lambda",
+                tune="scaling",
                 tune_interval=100,
                 tune_drop_fraction=0.9
             )
@@ -594,9 +621,9 @@ if __name__ == "__main__":
             "scaling": 0.1,
         },
         "throat_obstruction" : {
-            "true": 0.20,
-            "prior_mu": 0.20 * 0.95,
-            "prior_sigma": 0.20 * 0.05,
+            "true": 0.10,
+            "prior_mu": 0.10 * 0.95,
+            "prior_sigma": 0.10 * 0.05,
             "scale": 0.01,
             "scaling": 0.01,
         },
@@ -610,12 +637,12 @@ if __name__ == "__main__":
     }
     
     all_cases = {    
-        "5p_nData_highOT": {
-            "Case_Name": "5p_nData_highOT",
+        "5p_nData_Long": {
+            "Case_Name": "5p_nData_Long",
             "Parameters": ["Cf_dnz", "eta_Total","combustion_end","throat_obstruction","bl_growth"],
 
-            "Draws" : 750,
-            "Tune" : 250,
+            "Draws" : 20000,
+            "Tune" : 1000,
             "Chains" : 12 ,
             "Cores" : 12
             }, 
