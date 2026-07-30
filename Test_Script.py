@@ -13,15 +13,15 @@ from forward_model import (
 
 config = ModelConfig(
     geometry_type="constant_area",
-    friction=False,
+    friction=True,
     boundary_layer=True,
     combustion=False,
 )
 
 geometry = ConstantAreaGeometry(
-    tube_area=45e-3 * 45e-3,
-    tube_length=0.5,
-    x_injLocation=0.5 * 0.15,
+    tube_area=1 *(45e-3 * 45e-3),
+    tube_length=1,
+    x_injLocation=1 * 0.15,
 )
 
 setup_gas = ct.Solution("h2_air.yaml")
@@ -118,8 +118,8 @@ forward_model = ForwardModel(
 True_Cf_dNz = 0.006
 True_eta_Total = 0.8
 True_combustion_end = geometry.tube_length*0.6
-True_precent_obstruction = 0.05
-True_bl_growth = 10
+True_precent_obstruction = 0.01
+True_bl_growth = 1.2
 
 results = forward_model.run(True_precent_obstruction,True_Cf_dNz,True_eta_Total,True_combustion_end,True_bl_growth)
 
