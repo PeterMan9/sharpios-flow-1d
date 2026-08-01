@@ -25,9 +25,7 @@ class ConstantAreaGeometry:
     @property
     def solver_end_location(self):
         return self.tube_length
-    @property
-    def throat_loc (self):
-        return self.tube_length
+    
     x_injLocation: float
 
     @property
@@ -181,7 +179,7 @@ class WindTunnelGeometry:
             effective_exit_area = effective_exit_height**2
             return effective_exit_area
 
-    def smallest_eff_area(self,bl_h,bl_g):
+    def throat_area(self,bl_h,bl_g):
         return self.geom_Area(self.throat_loc,bl_h,bl_g)
     
     #hydraulic diameter 
@@ -778,41 +776,71 @@ class ForwardModel:
     #Full Solver
     def solver(self,Preburner_TStag: float,Cf_sampling: float,eta_total: float,combustion_end: float,bl_h: float,
             bl_growth: float,scale: float, acceptedScale: bool, supersonicSolve: bool) -> dict[str, Any]:
-        
-        Preburner_T = Preburner_TStag #k
+        inlet_T = Preburner_TStag #k
 
-        Preburner_predictedPStag = self.pstag_predicted(self.ICs.mdot_i, self.geometry.smallest_eff_area(bl_h,bl_growth), Preburner_TStag, self.gas_properties(Preburner_TStag, 101325, self.ICs.Y_mix)["gamma"])
-        og_Preburner_P = self.newtonRaphson_P(Preburner_predictedPStag,Preburner_predictedPStag, Preburner_T, self.gas_properties(Preburner_T, 101325, self.ICs.Y_mix)["gamma"],bl_h, bl_growth)
+        if self.config.geometry_type == "wind_tunnel":
 
-        if acceptedScale == False:
-            if scale ==1:
-                Preburner_P = og_Preburner_P
-            else:
+
+            Preburner_predictedPStag = self.pstag_predicted(self.ICs.mdot_i, self.geometry.throat_area(bl_h,bl_growth), Preburner_TStag, self.gas_properties(Preburner_TStag, 101325, self.ICs.Y_mix)["gamma"])
+            og_Preburner_P = self.newtonRaphson_P(Preburner_predictedPStag,Preburner_predictedPStag, inlet_T, self.gas_properties(inlet_T, 101325, self.ICs.Y_mix)["gamma"],bl_h, bl_growth)
+
+            if acceptedScale == False:
+                if scale ==1:
+                    Preburner_P = og_Preburner_P
+                else:
+                    Preburner_P = og_Preburner_P * scale
+
+                Preburner_U = self.ICs.mdot_i/(Preburner_P * self.geometry.inlet_area(bl_h, bl_growth) / (self.ICs.R_mix * inlet_T))
+                Preburner_gasProperties = self.gas_properties(inlet_T, Preburner_P, self.ICs.Y_mix)
+
+                M_Preburner_Inlet = Preburner_U/soS(inlet_T,self.ICs.R_mix,Preburner_gasProperties["gamma"])
+                rho_preburner = self.ICs.mdot_i/(self.geometry.inlet_area(bl_h, bl_growth) * Preburner_U)
+                Preburner_Pstag = Preburner_predictedPStag
+
+                inlet_U = Preburner_U
+                inlet_P = Preburner_P
+                inlet_Tstag = Preburner_TStag
+                inlet_Pstag = Preburner_Pstag
+                inlet_rho = rho_preburner
+                inlet_M = M_Preburner_Inlet
+
+            elif acceptedScale == True:
                 Preburner_P = og_Preburner_P * scale
+                Preburner_gasProperties = self.gas_properties(inlet_T, Preburner_P, self.ICs.Y_mix)
+                Preburner_U = self.ICs.mdot_i/(Preburner_P * self.geometry.inlet_area(bl_h, bl_growth) / (self.ICs.R_mix * inlet_T))
+                M_Preburner_Inlet = Preburner_U/soS(inlet_T,self.ICs.R_mix,Preburner_gasProperties["gamma"])
+                rho_preburner = self.ICs.mdot_i/(self.geometry.inlet_area(bl_h, bl_growth) * Preburner_U)
+                Preburner_Pstag = self.pressureStagFunc(Preburner_P,M_Preburner_Inlet,Preburner_gasProperties["gamma"])
 
-            Preburner_U = self.ICs.mdot_i/(Preburner_P * self.geometry.inlet_area(bl_h, bl_growth) / (self.ICs.R_mix * Preburner_T))
-            Preburner_gasProperties = self.gas_properties(Preburner_T, Preburner_P, self.ICs.Y_mix)
+                inlet_U = Preburner_U
+                inlet_P = Preburner_P
+                inlet_Tstag = Preburner_TStag
+                inlet_Pstag = Preburner_Pstag
+                inlet_rho = rho_preburner
+                inlet_M = M_Preburner_Inlet
 
-            M_Preburner_Inlet = Preburner_U/soS(Preburner_T,self.ICs.R_mix,Preburner_gasProperties["gamma"])
-            rho_preburner = self.ICs.mdot_i/(self.geometry.inlet_area(bl_h, bl_growth) * Preburner_U)
-            Preburner_Pstag = Preburner_predictedPStag
+            PT_locations = [0.1,0.3,0.4,0.495,0.5,0.505,0.51,0.55,0.6,0.64]
 
-        elif acceptedScale == True:
-            Preburner_P = og_Preburner_P * scale
-            Preburner_gasProperties = self.gas_properties(Preburner_T, Preburner_P, self.ICs.Y_mix)
-            Preburner_U = self.ICs.mdot_i/(Preburner_P * self.geometry.inlet_area(bl_h, bl_growth) / (self.ICs.R_mix * Preburner_T))
-            M_Preburner_Inlet = Preburner_U/soS(Preburner_T,self.ICs.R_mix,Preburner_gasProperties["gamma"])
-            rho_preburner = self.ICs.mdot_i/(self.geometry.inlet_area(bl_h, bl_growth) * Preburner_U)
-            Preburner_Pstag = self.pressureStagFunc(Preburner_P,M_Preburner_Inlet,Preburner_gasProperties["gamma"])
+        elif self.config.geometry_type == "constant_area":
 
+            inlet_Pstag = self.pstag_predicted(self.ICs.mdot_i, self.geometry.smallest_eff_area(bl_h,bl_growth), Preburner_TStag, self.gas_properties(Preburner_TStag, 101325, self.ICs.Y_mix)["gamma"])
+            inlet_P = self.newtonRaphson_P(inlet_Pstag,inlet_Pstag, inlet_T, self.gas_properties(inlet_T, 101325, self.ICs.Y_mix)["gamma"],bl_h, bl_growth)
+            inlet_gasProperties = self.gas_properties(inlet_T, inlet_P, self.ICs.Y_mix)
 
-        temp = [Preburner_T]                # creating fresh arrays in function 
-        velocities = [Preburner_U]
-        pressure = [Preburner_P]
-        pStag = [Preburner_Pstag]
-        tStag = [Preburner_TStag]
-        machNum = [M_Preburner_Inlet]
-        density = [rho_preburner]
+            inlet_U = self.ICs.mdot_i/(inlet_P * self.geometry.inlet_area(bl_h, bl_growth) / (self.ICs.R_mix * inlet_T))
+            inlet_M = inlet_U/soS(inlet_T,self.ICs.R_mix,inlet_gasProperties["gamma"])
+            inlet_rho = self.ICs.mdot_i/(self.geometry.inlet_area(bl_h, bl_growth) * inlet_U)
+            M_Preburner_Inlet = 1.005
+            PT_locations = [0.1,0.3,0.4,0.495,0.5,0.505,0.51,0.55,0.6,0.64]
+
+            
+        temp = [inlet_T]                # creating fresh arrays in function 
+        velocities = [inlet_U]
+        pressure = [inlet_P]
+        pStag = [inlet_Pstag]
+        tStag = [inlet_Tstag]
+        machNum = [inlet_M]
+        density = [inlet_rho]
         areaList = [self.geometry.geom_Area(0,bl_h,bl_growth)]
         dAdxList = [0.0]
         areaRatio = [1.0]
@@ -822,10 +850,10 @@ class ForwardModel:
         
         pt_location = []
         pt_pressures = []
-        PT_locations = [0.1,0.3,0.4,0.495,0.5,0.505,0.51,0.55,0.6,0.64]
+        
 
 
-        sInitial = self.gas_properties(Preburner_T, Preburner_P,self.ICs.Y_mix)["s"]
+        sInitial = self.gas_properties(inlet_T, inlet_P,self.ICs.Y_mix)["s"]
         entropy = [sInitial]
 
         mdotReconstructed = [self.ICs.mdot_i] #recontruction array to check if calcs are correct 
@@ -860,8 +888,6 @@ class ForwardModel:
                     f"bl_h={bl_h},\n"
                     f"bl_growth={bl_growth}\n")
                     
-            
-
 
             xPrev = xList[-1]     
             hPrev = stepList[-1] #from step 0 to step 1 and then step 1 to step 2 etc 
@@ -870,8 +896,8 @@ class ForwardModel:
             Pbefore = pressure[-1]
             Tbefore = temp [-1]
             
-            xNext, VCurrent, PCurrent, TCurrent, hNext, location = self.rk45Step(Vbefore,Pbefore,Cf_sampling,hPrev, xPrev,Tbefore,eta_total,combustion_end,bl_h,bl_growth)
-
+            xNext, VCurrent, PCurrent, TCurrent, hNext, location = self.rk45Step(Vbefore,Pbefore,Cf_sampling,hPrev, 
+                                                                                 xPrev,Tbefore,eta_total,combustion_end,bl_h,bl_growth)
 
             if location == "Preburner":
                 pb_count +=1
@@ -887,7 +913,6 @@ class ForwardModel:
 
             xList.append(xNext)
             xCurrent = xList[-1]
-
 
             areaList.append(self.geometry.geom_Area(xCurrent,bl_h,bl_growth))
             dAdxList.append(self.geometry.dAdx(xCurrent,bl_h,bl_growth))
@@ -918,54 +943,92 @@ class ForwardModel:
 
             sCurrent = currentMix_properties["s"]
             entropy.append(sCurrent)
+            
+            if self.config.geometry_type == "wind_tunnel":
+                if supersonicSolve == True:
+                    pt_P, pt_x= pressureTap(xList[-2],pressure[-2],xCurrent, PCurrent,PT_locations)
 
-            if supersonicSolve == True:
-                pt_P, pt_x= pressureTap(xList[-2],pressure[-2],xCurrent, PCurrent,PT_locations)
+                    if pt_P is not None:
+                        pt_location.append(pt_x)
+                        pt_pressures.append(pt_P)
 
-                if pt_P is not None:
-                    pt_location.append(pt_x)
-                    pt_pressures.append(pt_P)
+                if MCurrent > 0.99 and supersonicSolve == False:
+                    break
 
-            if MCurrent > 0.99 and supersonicSolve == False:
-                break
+                elif acceptedScale == True and supersonicSolve == True and (self.geometry.geometry_regions(xCurrent) == "Throat" or (MCurrent >= 0.99 and xCurrent  < self.geometry.throat_loc)):
+                    throatP = pressure[-1]
+                    throatT = temp[-1]
+                    throatPstag = pStag[-1]
+                    throatTstag = tStag[-1]
+                    MachN = 1.005
+                    throatMix_properties = self.gas_properties(throatT, throatP,self.ICs.Y_mix)
+                    throatMix_gamma = throatMix_properties["gamma"]
+                    entropy_throat = throatMix_properties["s"]
 
-            elif acceptedScale == True and supersonicSolve == True and (self.geometry.geometry_regions(xCurrent) == "Throat" or (MCurrent >= 0.99 and xCurrent  < self.geometry.throat_loc)):
-                throatP = pressure[-1]
-                throatT = temp[-1]
-                throatPstag = pStag[-1]
-                throatTstag = tStag[-1]
-                MachN = 1.005
-                throatMix_properties = self.gas_properties(throatT, throatP,self.ICs.Y_mix)
-                throatMix_gamma = throatMix_properties["gamma"]
-                entropy_throat = throatMix_properties["s"]
+                    P_new, T_New = self.stagtostatic(throatPstag,throatTstag,MachN,throatMix_gamma)
+                    V_new = MachN * soS(T_New,self.ICs.R_mix,throatMix_gamma)
+                    xEndofThroat = self.geometry.throat_loc + 0.005
+                    rho_New = mdotlocal/(self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth) * V_new)
 
-                P_new, T_New = self.stagtostatic(throatPstag,throatTstag,MachN,throatMix_gamma)
-                V_new = MachN * soS(T_New,self.ICs.R_mix,throatMix_gamma)
-                xEndofThroat = self.geometry.throat_loc + 0.005
-                rho_New = mdotlocal/(self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth) * V_new)
+                    mdotReconstructed.append(rho_New * V_new * self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth))
+                    mdotList.append(self.mdotFuncX(xEndofThroat))
+                    stepList.append(0.001)
+                    xList.append(xEndofThroat)
+                    pressure.append(P_new)
+                    velocities.append(V_new)
+                    temp.append(T_New)
+                    density.append(rho_New)
+                    machNum.append(MachN)
+                    pStag.append(throatPstag)
+                    tStag.append(throatTstag)
+                    entropy.append(entropy_throat)
+                    areaList.append(self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth))
+                    dAdxList.append(self.geometry.dAdx(xEndofThroat,bl_h,bl_growth))
 
-                mdotReconstructed.append(rho_New * V_new * self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth))
-                mdotList.append(self.mdotFuncX(xEndofThroat))
-                stepList.append(0.001)
-                xList.append(xEndofThroat)
-                pressure.append(P_new)
-                velocities.append(V_new)
-                temp.append(T_New)
-                density.append(rho_New)
-                machNum.append(MachN)
-                pStag.append(throatPstag)
-                tStag.append(throatTstag)
-                entropy.append(entropy_throat)
-                areaList.append(self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth))
-                dAdxList.append(self.geometry.dAdx(xEndofThroat,bl_h,bl_growth))
+                    pt_P, pt_x = pressureTap(xList[-2],pressure[-2],xEndofThroat, P_new,PT_locations)
+                    if pt_P is not None:
 
-                pt_P, pt_x = pressureTap(xList[-2],pressure[-2],xEndofThroat, P_new,PT_locations)
-                if pt_P is not None:
+                        pt_location.append(pt_x)
+                        pt_pressures.append(pt_P)
+                else:
+                    continue
 
-                    pt_location.append(pt_x)
-                    pt_pressures.append(pt_P)
-            else:
-                continue
+            if self.config.geometry_type == "wind_tunnel":
+                if 0.99 <  MCurrent < 1.00:
+                    throatP = pressure[-1]
+                    throatT = temp[-1]
+                    throatPstag = pStag[-1]
+                    throatTstag = tStag[-1]
+                    MachN = 1.005
+                    throatMix_properties = self.gas_properties(throatT, throatP,self.ICs.Y_mix)
+                    throatMix_gamma = throatMix_properties["gamma"]
+                    entropy_throat = throatMix_properties["s"]
+
+                    P_new, T_New = self.stagtostatic(throatPstag,throatTstag,MachN,throatMix_gamma)
+                    V_new = MachN * soS(T_New,self.ICs.R_mix,throatMix_gamma)
+                    xEndofThroat = self.geometry.throat_loc + 0.005
+                    rho_New = mdotlocal/(self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth) * V_new)
+
+                    mdotReconstructed.append(rho_New * V_new * self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth))
+                    mdotList.append(self.mdotFuncX(xEndofThroat))
+                    stepList.append(0.001)
+                    xList.append(xEndofThroat)
+                    pressure.append(P_new)
+                    velocities.append(V_new)
+                    temp.append(T_New)
+                    density.append(rho_New)
+                    machNum.append(MachN)
+                    pStag.append(throatPstag)
+                    tStag.append(throatTstag)
+                    entropy.append(entropy_throat)
+                    areaList.append(self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth))
+                    dAdxList.append(self.geometry.dAdx(xEndofThroat,bl_h,bl_growth))
+
+                    pt_P, pt_x = pressureTap(xList[-2],pressure[-2],xEndofThroat, P_new,PT_locations)
+                    if pt_P is not None:
+
+                        pt_location.append(pt_x)
+                        pt_pressures.append(pt_P)
 
         #converting to np arrays
         V_List = np.array(velocities)
@@ -1188,26 +1251,12 @@ class ForwardModel:
 
         elif self.config.geometry_type == "constant_area":
             start_time_total =  time.perf_counter()
-            start_time_scaling = time.perf_counter()
-
-            scale_low, scale_high, res_low, res_high = (self.scaling_InletPressure_NOTPar(Cf_sampling,eta_total,combustion_end,bl_h,effective_bl_growth,))
-            end_time_scaling = time.perf_counter()
-
-            if res_low * res_high > 0:
-                raise RuntimeError(f"Scale bracket does not contain a root: "f"scale_low={scale_low}, res_low={res_low}, "f"scale_high={scale_high}, res_high={res_high}")
-            
-            start_time_H = time.perf_counter()
-            final_scale, final_res = self.scale_HybridNewBisec(scale_low,scale_high,res_low,res_high,Cf_sampling,
-                eta_total,combustion_end,bl_h,effective_bl_growth,)
-            end_time_H = time.perf_counter()
-
-            start_time_solve = time.perf_counter()
-
+           
             results = self.solver(Preburner_TStag=self.ICs.TstagAir,Cf_sampling=Cf_sampling,eta_total=eta_total,combustion_end=combustion_end,bl_h=bl_h,
                                 bl_growth=effective_bl_growth,scale=final_scale,acceptedScale=True,supersonicSolve=True,)
-            end_time_solve = time.perf_counter()
 
             end_time_total =  time.perf_counter()
+            
             '''
             print("scaling time", end_time_scaling - start_time_scaling)
             print("Hybrid time", end_time_H - start_time_H)
