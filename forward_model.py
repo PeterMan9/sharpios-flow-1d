@@ -55,8 +55,6 @@ class ConstantAreaGeometry:
         return bL_Y
     
     #solving for area based on location and boundary layer stuff
-    #only having the boundary in the converging and diverging parts of the nozzle. 
-    #only having the boundary layer growth in the diverging part because that is when the flow goes super sonic
     def geom_Area(self,x: float, bl_h: float = 0.0 ,bl_growth: float = 0.0) -> float:
         effective_inlet_area = (self.tube_height - bl_h)**2
         xi = (x - 0)/self.x_end
@@ -408,8 +406,9 @@ class ForwardModel:
             "h": self.gas.enthalpy_mass,
             "gamma": self.gas.cp_mass/self.gas.cv_mass,
             "R_specific": self.gas.cp_mass - self.gas.cv_mass,
-            "s": self.gas.entropy_mass}
-    
+            "s": self.gas.entropy_mass,
+            "mu": self.gas.viscosity}
+
     def heat_release(self,x:float, dx:float, eta_total:float, combustion_end:float) -> float:
         if self.config.combustion:
             return self.combustion_model.dHtdx(x,dx,eta_total,combustion_end)
@@ -822,8 +821,8 @@ class ForwardModel:
             PT_locations = [0.1,0.3,0.4,0.495,0.5,0.505,0.51,0.55,0.6,0.64]
 
         elif self.config.geometry_type == "constant_area":
-
-            inlet_Pstag = self.pstag_predicted(self.ICs.mdot_i, self.geometry.smallest_eff_area(bl_h,bl_growth), Preburner_TStag, self.gas_properties(Preburner_TStag, 101325, self.ICs.Y_mix)["gamma"])
+            inlet_Tstag = Preburner_TStag
+            inlet_Pstag = self.pstag_predicted(self.ICs.mdot_i, self.geometry.smallest_eff_area(bl_h,bl_growth), inlet_Tstag, self.gas_properties(inlet_Tstag, 101325, self.ICs.Y_mix)["gamma"])
             inlet_P = self.newtonRaphson_P(inlet_Pstag,inlet_Pstag, inlet_T, self.gas_properties(inlet_T, 101325, self.ICs.Y_mix)["gamma"],bl_h, bl_growth)
             inlet_gasProperties = self.gas_properties(inlet_T, inlet_P, self.ICs.Y_mix)
 
@@ -831,7 +830,10 @@ class ForwardModel:
             inlet_M = inlet_U/soS(inlet_T,self.ICs.R_mix,inlet_gasProperties["gamma"])
             inlet_rho = self.ICs.mdot_i/(self.geometry.inlet_area(bl_h, bl_growth) * inlet_U)
             M_Preburner_Inlet = 1.005
-            PT_locations = [0.1,0.3,0.4,0.495,0.5,0.505,0.51,0.55,0.6,0.64]
+
+            sonicSolveCount = 0
+            dataGatherCounter = 0
+            PT_locations = [0.1,0.2,0.25,0.3,0.35,0.4,0.5,0.6,0.7,0.9]
 
             
         temp = [inlet_T]                # creating fresh arrays in function 
@@ -869,11 +871,20 @@ class ForwardModel:
             solver_steps += 1
 
             if solver_steps > max_solver_steps:
+                print("solver failed, exceeded max_solver_steps")
+                print("M = ",machNum[-1], "M2 = ",machNum[-2])
+                print("x = ",xList[-1], "x2 = ",xList[-2])
+                
+                print(f"dMdx={(machNum[-1] - machNum[-2]) / (xList[-1] - xList[-2]):.6e}")
+                print(f"V={velocities[-1]}, P={pressure[-1]}, T={temp[-1]}")
+                break
+                '''
                 raise RuntimeError(
                     f"solver exceeded max_solver_steps:\n "
                     f"x={xList[-1]}, solver_end_location={self.geometry.solver_end_location},\n"
                     f"h={stepList[-1]},\n "
                     f"M={machNum[-1]},\n"
+                    f"dMdx={(machNum[-1] - machNum[-2]) / (xList[-1] - xList[-2]):.6e},\n"                    
                     f"V={velocities[-1]},\n"
                     f"P={pressure[-1]},\n"
                     f"T={temp[-1]},\n"
@@ -886,7 +897,7 @@ class ForwardModel:
                     f"eta_total={eta_total},\n"
                     f"combustion_end={combustion_end},\n"
                     f"bl_h={bl_h},\n"
-                    f"bl_growth={bl_growth}\n")
+                    f"bl_growth={bl_growth}\n")'''
                     
 
             xPrev = xList[-1]     
@@ -993,42 +1004,100 @@ class ForwardModel:
                 else:
                     continue
 
-            if self.config.geometry_type == "wind_tunnel":
-                if 0.99 <  MCurrent < 1.00:
-                    throatP = pressure[-1]
-                    throatT = temp[-1]
-                    throatPstag = pStag[-1]
-                    throatTstag = tStag[-1]
-                    MachN = 1.005
-                    throatMix_properties = self.gas_properties(throatT, throatP,self.ICs.Y_mix)
-                    throatMix_gamma = throatMix_properties["gamma"]
-                    entropy_throat = throatMix_properties["s"]
+            if self.config.geometry_type == "constant_area":
 
-                    P_new, T_New = self.stagtostatic(throatPstag,throatTstag,MachN,throatMix_gamma)
-                    V_new = MachN * soS(T_New,self.ICs.R_mix,throatMix_gamma)
-                    xEndofThroat = self.geometry.throat_loc + 0.005
-                    rho_New = mdotlocal/(self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth) * V_new)
+                pt_P, pt_x= pressureTap(xList[-2],pressure[-2],xCurrent, PCurrent,PT_locations)
 
-                    mdotReconstructed.append(rho_New * V_new * self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth))
-                    mdotList.append(self.mdotFuncX(xEndofThroat))
+                if pt_P is not None:
+                    pt_location.append(pt_x)
+                    pt_pressures.append(pt_P)
+
+                if len(pt_location) > 3 and dataGatherCounter == 0:
+                    dynamic_viscosity = self.gas_properties(temp[-1],pressure[-1],self.ICs.Y_mix)["mu"]
+                    d_tube = np.sqrt(self.geometry.tube_area/np.pi) * 2
+                    Re = density[-1] * velocities[-1] * d_tube / dynamic_viscosity
+                    data_vector = np.array([Re, machNum[-1],temp[-1],xList[-1]])
+                    dataGatherCounter += 1
+
+
+                #1st mach num crossing 
+                if 0.995 <  MCurrent < 1.00 and (sonicSolveCount == 0 or sonicSolveCount > 1): 
+                    sonicSolveCount = 1
+                    pre_chokeP = pressure[-1]
+                    pre_chokeT = temp[-1]
+                    pre_chokePstag = pStag[-1]
+                    pre_chokeTstag = tStag[-1]
+                    pre_chokeX = xList[-1]
+                    MachN = 1.0001
+                    choke_Mix_properties = self.gas_properties(pre_chokeT, pre_chokeP,self.ICs.Y_mix)
+                    choke_Mix_gamma = choke_Mix_properties["gamma"]
+                    choke_entropy = choke_Mix_properties["s"]
+
+                    P_new, T_New = self.stagtostatic(pre_chokePstag,pre_chokeTstag,MachN,choke_Mix_gamma)
+                    V_new = MachN * soS(T_New,self.ICs.R_mix,choke_Mix_gamma)
+                    post_chokeX = pre_chokeX + (self.geometry.solver_end_location)/100
+                    rho_New = mdotlocal/(self.geometry.geom_Area(post_chokeX,bl_h,bl_growth) * V_new)
+
+                    mdotReconstructed.append(rho_New * V_new * self.geometry.geom_Area(post_chokeX,bl_h,bl_growth))
+                    mdotList.append(self.mdotFuncX(post_chokeX))
                     stepList.append(0.001)
-                    xList.append(xEndofThroat)
+                    xList.append(post_chokeX)
                     pressure.append(P_new)
                     velocities.append(V_new)
                     temp.append(T_New)
                     density.append(rho_New)
                     machNum.append(MachN)
-                    pStag.append(throatPstag)
-                    tStag.append(throatTstag)
-                    entropy.append(entropy_throat)
-                    areaList.append(self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth))
-                    dAdxList.append(self.geometry.dAdx(xEndofThroat,bl_h,bl_growth))
+                    pStag.append(pre_chokePstag)
+                    tStag.append(pre_chokeTstag)
+                    entropy.append(choke_entropy)
+                    areaList.append(self.geometry.geom_Area(post_chokeX,bl_h,bl_growth))
+                    dAdxList.append(self.geometry.dAdx(post_chokeX,bl_h,bl_growth))
 
-                    pt_P, pt_x = pressureTap(xList[-2],pressure[-2],xEndofThroat, P_new,PT_locations)
+                    pt_P, pt_x = pressureTap(xList[-2],pressure[-2],post_chokeX, P_new,PT_locations)
+
                     if pt_P is not None:
-
                         pt_location.append(pt_x)
                         pt_pressures.append(pt_P)
+
+                elif 1.00 < MCurrent < 1.005 and (sonicSolveCount == 1 or sonicSolveCount > 1):
+                    sonicSolveCount = 2
+                    post_chokeP = pressure[-1]
+                    post_chokeT = temp[-1]
+                    post_chokePstag = pStag[-1]
+                    post_chokeTstag = tStag[-1]
+                    post_chokeX = xList[-1]
+                    MachN = 0.9999
+                    choke_Mix_properties = self.gas_properties(post_chokeT, post_chokeP,self.ICs.Y_mix)
+                    choke_Mix_gamma = choke_Mix_properties["gamma"]
+                    choke_entropy = choke_Mix_properties["s"]
+
+                    P_new, T_New = self.stagtostatic(post_chokePstag,post_chokeTstag,MachN,choke_Mix_gamma)
+                    V_new = MachN * soS(T_New,self.ICs.R_mix,choke_Mix_gamma)
+                    pre_chokeX = post_chokeX + (self.geometry.solver_end_location)/100
+                    rho_New = mdotlocal/(self.geometry.geom_Area(pre_chokeX,bl_h,bl_growth) * V_new)
+
+                    mdotReconstructed.append(rho_New * V_new * self.geometry.geom_Area(pre_chokeX,bl_h,bl_growth))
+                    mdotList.append(self.mdotFuncX(pre_chokeX))
+                    stepList.append(0.001)
+                    xList.append(pre_chokeX)
+                    pressure.append(P_new)
+                    velocities.append(V_new)
+                    temp.append(T_New)
+                    density.append(rho_New)
+                    machNum.append(MachN)
+                    pStag.append(post_chokePstag)
+                    tStag.append(post_chokeTstag)
+                    entropy.append(choke_entropy)
+                    areaList.append(self.geometry.geom_Area(pre_chokeX,bl_h,bl_growth))
+                    dAdxList.append(self.geometry.dAdx(pre_chokeX,bl_h,bl_growth))
+
+                    pt_P, pt_x = pressureTap(xList[-2],pressure[-2],pre_chokeX, P_new,PT_locations)
+
+                    if pt_P is not None:
+                        pt_location.append(pt_x)
+                        pt_pressures.append(pt_P)
+                else:
+                    continue 
 
         #converting to np arrays
         V_List = np.array(velocities)
@@ -1073,7 +1142,8 @@ class ForwardModel:
             "throat_Count": throat_count,
             "Throat_Pressure": throatP,
             "PT_P": pt_PressureList,
-            "PT_X": pt_locationList}
+            "PT_X": pt_locationList,
+            "data_vector": data_vector if self.config.geometry_type == "constant_area" else None}
     
     #Sweeping
     def chokedLocationResiduals(self,scale: float, Cf_sampling: float,eta_total: float,combustion_end: float,bl_h: float,bl_growth: float) -> float:
@@ -1253,7 +1323,7 @@ class ForwardModel:
             start_time_total =  time.perf_counter()
            
             results = self.solver(Preburner_TStag=self.ICs.TstagAir,Cf_sampling=Cf_sampling,eta_total=eta_total,combustion_end=combustion_end,bl_h=bl_h,
-                                bl_growth=effective_bl_growth,scale=final_scale,acceptedScale=True,supersonicSolve=True,)
+                                bl_growth=effective_bl_growth,scale=0,acceptedScale=True,supersonicSolve=True,)
 
             end_time_total =  time.perf_counter()
             

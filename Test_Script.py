@@ -17,9 +17,8 @@ config = ModelConfig(
     boundary_layer=True,
     combustion=False,
 )
-
 geometry = ConstantAreaGeometry(
-    tube_area=1 *(45e-3 * 45e-3),
+    tube_area=7 *(45e-3 * 45e-3),
     tube_length=1,
     x_injLocation=1 * 0.15,
 )
@@ -55,6 +54,7 @@ T_H2 = 300.0
 
 P_air = 7.708339e6
 P_H2 = 8.315077e6
+
 
 M1 = 0.999
 M2 = 0.999
@@ -122,12 +122,22 @@ True_precent_obstruction = 0.01
 True_bl_growth = 1.2
 
 results = forward_model.run(True_precent_obstruction,True_Cf_dNz,True_eta_Total,True_combustion_end,True_bl_growth)
-
-
+print(results["PT_X"])
+print(results["PT_P"])
+'''
 plt.plot(results["x"], results["Area"])
 plt.xlabel("X")
 plt.ylabel("Area (m^2)")
 plt.savefig("x vs area for tube")
+plt.close()
+'''
+
+plt.plot(results["x"], results["pressure"], "--", label="Predicted Pressure")
+plt.plot(results["PT_X"],results["PT_P"], "o", label="PT Pressure")
+plt.xlabel("X")
+plt.ylabel("pressure (Pa)")
+plt.legend()
+plt.savefig("x vs PT vs Predicted Pressure ")
 plt.close()
 
 plt.plot(results["x"], results["Mach"])
@@ -136,9 +146,4 @@ plt.ylabel("Mach")
 plt.savefig("x vs Mach for tube")
 plt.close()
 
-plt.plot(results["x"], results["entropy"])
-plt.xlabel("X")
-plt.ylabel("entropy")
-plt.savefig("x vs entropy for tube")
-plt.close()
 
