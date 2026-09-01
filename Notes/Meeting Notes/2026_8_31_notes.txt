@@ -1,0 +1,9 @@
+Model related first:
+
+So with regards to the boundary layer growth and % throat obstruction look into 
+    rals opinion on having the % obstruction include the bl_growth or if it can just be added on top later 
+
+Mention that I was thinking about having multiple Re,M,T probes to make the calibration a bit more accurate. the actual implementation would tie into the 
+    previous question 
+
+Besides that ask if my reference letters choices are ok 

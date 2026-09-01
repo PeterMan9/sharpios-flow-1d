@@ -1,0 +1,5 @@
+Case_Name: Boundary_Layer_Growth_submodel_Long_Test
+Draws: 20000
+Tune: 1500
+Chains: 12
+Cores: 12

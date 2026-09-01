@@ -18,7 +18,7 @@ config = ModelConfig(
     combustion=False,
 )
 geometry = ConstantAreaGeometry(
-    tube_area=7 *(45e-3 * 45e-3),
+    tube_area=1 *(45e-3 * 45e-3),
     tube_length=1,
     x_injLocation=1 * 0.15,
 )
@@ -114,23 +114,20 @@ forward_model = ForwardModel(
     mechanism="h2_air.yaml"
 )
 
-
-True_Cf_dNz = 0.006
+True_Cf_dNz = 0.002
 True_eta_Total = 0.8
 True_combustion_end = geometry.tube_length*0.6
 True_precent_obstruction = 0.01
 True_bl_growth = 1.2
 
 results = forward_model.run(True_precent_obstruction,True_Cf_dNz,True_eta_Total,True_combustion_end,True_bl_growth)
-print(results["PT_X"])
-print(results["PT_P"])
-'''
+
 plt.plot(results["x"], results["Area"])
 plt.xlabel("X")
 plt.ylabel("Area (m^2)")
 plt.savefig("x vs area for tube")
 plt.close()
-'''
+
 
 plt.plot(results["x"], results["pressure"], "--", label="Predicted Pressure")
 plt.plot(results["PT_X"],results["PT_P"], "o", label="PT Pressure")

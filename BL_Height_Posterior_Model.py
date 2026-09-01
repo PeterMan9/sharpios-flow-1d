@@ -135,7 +135,7 @@ True_precent_obstruction = 0.01
 True_bl_growth = 1.2
 
 
-def bl_growthFunc(A,B,C,Re,M,T):
+def bl_heightFunc(A,B,C,Re,M,T):
     return A * Re + B * M + C * T
 #MCMC functions
 #using black box approach 
@@ -153,9 +153,14 @@ def log_likelihood(A,B,C,true_PTPressure,true_param_values,data_vector):
 
     try:
         #the order of inputs for this func is: throat_obstruction,Cf_dnz,eta_total,combustion_end,bl_growth
-        #i am building my own bl_growth based off of A,B,C, but the others will stay the same 
-        bl_growth = bl_growthFunc(A,B,C,data_vector[0],data_vector[1],data_vector[2])
-        results = forward_model.run(true_param_values[3],true_param_values[0],true_param_values[1],true_param_values[2],bl_growth)
+        #i am building my own bl_height based off of A,B,C, but the others will stay the same 
+        bl_height = bl_heightFunc(A,B,C,data_vector[0],data_vector[1],data_vector[2])
+        #i am calculating the percent obstruction based off of the bl_height that is generated from my func etc 
+        tube_height = forward_model.geometry.tube_height
+        unaffected_height = tube_height - bl_height
+        unaffected_area = unaffected_height **2
+        percent_obstruction = 1 - unaffected_area/ forward_model.geometry.tube_area
+        results = forward_model.run(percent_obstruction,true_param_values[0],true_param_values[1],true_param_values[2],true_param_values[4])
 
         Predicted_PTPressure = results["PT_P"]
 
@@ -263,6 +268,7 @@ def run_MCMC_case(case, parameters, true_values):
 
             #generating my TRUE pressure data. also getting my data vector for my emperical bl growth function
             true_PTPressure,data_vector = generatingTrueValues(set_True_Cf_dnz,set_True_eta_Total,set_True_combustion_end,set_True_throat_obstruction,set_True_bl_growth)
+
             # Setting up prior distributions for the three coeff A, B, and C.
             # PyMC will propose/sample values of these random variables during MCMC.
             rv_PriorA = pm.Normal("A", mu=set_A_Prior_mu,  sigma=set_A_Prior_sigma,
@@ -348,10 +354,10 @@ def run_MCMC_case(case, parameters, true_values):
         f.write(f"{case['Case_Name']} Values \n")
 
         f.write(f"True Values for uncertain parameters used to mimic real gathered data \n")
-        f.write(f"True Diverging Nozzle Cf = {set_True_Cf_dnz}\n")
+        f.write(f"True Cf = {set_True_Cf_dnz}\n")
         f.write(f"True Eta Total = {set_True_eta_Total}\n")
         f.write(f"True Combustion End = {set_True_combustion_end}\n")
-        f.write(f"True Throat Obstruction Pecentage = {set_True_throat_obstruction}\n")
+        f.write(f"True Max Obstruction Pecentage = {set_True_throat_obstruction}\n")
         f.write(f"True Boundary Layer Growth = {set_True_bl_growth}\n")
 
         f.write(f"\nCoefficent A Prior Mean = {set_A_Prior_mu}\n")
@@ -390,15 +396,8 @@ def run_MCMC_case(case, parameters, true_values):
     C_samples = trace.posterior["C"].values.flatten()
 
     #calculating the boundary layer growth using the posterior samples
-    bl_growth_samples = bl_growthFunc(A_samples,B_samples,C_samples,data_vector[0],data_vector[1],data_vector[2])
-
-    true_values = {
-            "Cf_dnz": set_True_Cf_dnz,
-            "eta_Total": set_True_eta_Total,
-            "combustion_end" : set_True_combustion_end,
-            "throat_obstruction" : set_True_throat_obstruction,
-            "bl_growth" : set_True_bl_growth
-        }
+    bl_height_samples = bl_heightFunc(A_samples,B_samples,C_samples,data_vector[0],data_vector[1],data_vector[2])
+    
 
     #labels for parameters to be used in plots - its just there so that i dont have to manually make new plots 
     param_labels = {
@@ -450,13 +449,13 @@ def run_MCMC_case(case, parameters, true_values):
         plt.savefig(diagnostics_folder / f"{param}_{nameofCase}_rank.png", dpi=200)
         plt.close()
 
-    pair_vars = ["A","B", "C", "bl_growth"]
+    pair_vars = ["A","B", "C", "bl_height"]
 
     pair_samples = {
         "A": trace.posterior["A"].values.flatten(),
         "B": trace.posterior["B"].values.flatten(),
         "C": trace.posterior["C"].values.flatten(),
-        "bl_growth": bl_growth_samples}
+        "bl_height": bl_height_samples}
 
     n = len(pair_vars)
     fig, axs = plt.subplots(n, n, figsize=(11, 11))
@@ -517,8 +516,8 @@ if __name__ == "__main__":
         "Case_Name": "BL_Growth_V1_LongTest",
         "Draws": 1000,
         "Tune": 100,
-        "Chains": 8,
-        "Cores": 8,
+        "Chains": 12,
+        "Cores": 12,
         }
     
 

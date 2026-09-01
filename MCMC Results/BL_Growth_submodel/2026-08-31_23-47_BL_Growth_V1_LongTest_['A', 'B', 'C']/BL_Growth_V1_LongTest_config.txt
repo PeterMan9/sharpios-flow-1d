@@ -1,0 +1,5 @@
+Case_Name: BL_Growth_V1_LongTest
+Draws: 1000
+Tune: 100
+Chains: 8
+Cores: 8
