@@ -45,36 +45,48 @@ class ConstantAreaGeometry:
     
     #function that allows me to input the % of tube area I will be obstruction and getting BL Layer in Return
     #goal is to give a % amount of area I the BL will take up and then make that the initial height and then apply a growth rate that grows as the flow speeds up
-    def bl_height(self,percent_obstruction: float) -> float:
-        unObstructed_tube_area = self.tube_area - self.tube_area * percent_obstruction
+    
+    #main change i want to do is that when i give a percent obstruction i want to get the MAX bl height in return. so this is including 
+    #the bl growth factor etc 
+    #and then from there I will back solve 
+    
+    def bl_height(self,percent_obstruction: float, bl_growth: float, x: float) -> float:
+        if bl_growth < 1: raise RuntimeError("BL growth cannot be less than 1")
+
+        unObstructed_tube_area = self.tube_area - (self.tube_area * percent_obstruction)
         unObstructed_tube_height = np.sqrt(unObstructed_tube_area)
-        bL_Y = self.tube_height - unObstructed_tube_height
-        return bL_Y
+        max_BL_Y = self.tube_height - unObstructed_tube_height
+
+        #normalized x
+        xi = np.clip((x)/self.x_end, 0, 1)
+        initial_BL_Y = max_BL_Y / bl_growth
+        
+        # Linear growth from initial BL height to max BL height
+        bl_height = initial_BL_Y + xi * (max_BL_Y - initial_BL_Y)
+        return bl_height
     
     #solving for area based on location and boundary layer stuff
-    def geom_Area(self,x: float, bl_h: float ,bl_growth: float ) -> float:
-        #normalized x
-        xi = np.clip((x - 0)/self.x_end, 0, 1)
-        bl_multiplier = 1.0 + xi * (bl_growth)
-        residual = bl_h - bl_h * bl_multiplier
-        return (self.tube_height - bl_h * bl_multiplier)**2
+    def geom_Area(self,x: float, percent_obstruction: float ,bl_growth: float ) -> float:
+        bl_height = self.bl_height(percent_obstruction, bl_growth, x)
+        return (self.tube_height - bl_height)**2
     
-    def smallest_eff_area(self, bl_height: float, bl_growth: float) -> float:
-        return self.geom_Area(self.tube_length, bl_height, bl_growth)
+    def smallest_eff_area(self, percent_obstruction: float, bl_growth: float) -> float:
+        return self.geom_Area(self.tube_length, percent_obstruction, bl_growth)
     
-    def inlet_area(self, bl_height: float, bl_growth: float):
-        return self.geom_Area(0, bl_height, bl_growth)
+    def inlet_area(self, percent_obstruction: float, bl_growth: float):
+        inlet_area = self.geom_Area(0, percent_obstruction, bl_growth)     
+        return inlet_area
     
     #dAdx func. Just using FDM for this - not actually deriving a true dAdx
-    def dAdx(self, x: float,bl_h: float,bl_growth: float,tol = 1e-3) -> float:
+    def dAdx(self, x: float,percent_obstruction: float,bl_growth: float,tol = 1e-3) -> float:
         xCurrent = x
         xPrev = x - max((x*tol),1e-9)
-        dA = self.geom_Area(xCurrent,bl_h,bl_growth) - self.geom_Area(xPrev,bl_h,bl_growth)
+        dA = self.geom_Area(xCurrent,percent_obstruction,bl_growth) - self.geom_Area(xPrev,percent_obstruction,bl_growth)
         return dA/(xCurrent - xPrev)
     
     #hydraulic diameter 
-    def Dh(self, x: float, bl_h: float = 0.0, bl_growth: float = 0.0) -> float:
-        return np.sqrt(self.geom_Area(x,bl_h,bl_growth))
+    def Dh(self, x: float, percent_obstruction: float = 0.0, bl_growth: float = 0.0) -> float:
+        return np.sqrt(self.geom_Area(x,percent_obstruction,bl_growth))
 
     #THIS IS FOR THE TUBE, I WILL JUST BE PUTTING A BLANKET CF ON IT - I WILL NOT EVEN BE SAMPLING CF MOST OF THE TIME
     def cf_location(self,x: float,Cf_sampling: float) -> float:
@@ -152,19 +164,19 @@ class WindTunnelGeometry:
     #solving for area based on location and boundary layer stuff
     #only having the boundary in the converging and diverging parts of the nozzle. 
     #only having the boundary layer growth in the diverging part because that is when the flow goes super sonic
-    def geom_Area(self,x: float, bl_h: float ,bl_growth: float) -> float:
+    def geom_Area(self,x: float, percent_obstruction: float ,bl_growth: float) -> float:
     
         if x <= self.preburner_length:
             return self.preburner_area
         
         elif x <= self.throat_loc:
-            effective_throat_area = (self.throat_Height - bl_h)**2
+            effective_throat_area = (self.throat_Height - percent_obstruction)**2
             xi = (x - self.preburner_length)/self.conv_Nozzle_length
             return self.preburner_area + self.smoothstep(xi) * (effective_throat_area - self.preburner_area)
         elif x <= self.nozzle_exit:
 
-            effective_throat_height = self.throat_Height - bl_h
-            effective_exit_height = np.sqrt(self.exit_Area) - (bl_growth * bl_h)
+            effective_throat_height = self.throat_Height - percent_obstruction
+            effective_exit_height = np.sqrt(self.exit_Area) - (bl_growth * percent_obstruction)
             
             effective_throat_area = effective_throat_height**2
             effective_exit_area = effective_exit_height**2
@@ -172,19 +184,19 @@ class WindTunnelGeometry:
             xi = (x - self.throat_loc)/(self.div_Nozzle_length)
             return effective_throat_area + self.smoothstep(xi) * (effective_exit_area - effective_throat_area)
         else:
-            effective_exit_height = np.sqrt(self.exit_Area) - (bl_growth * bl_h)
+            effective_exit_height = np.sqrt(self.exit_Area) - (bl_growth * percent_obstruction)
             effective_exit_area = effective_exit_height**2
             return effective_exit_area
 
-    def throat_area(self,bl_h,bl_g):
-        return self.geom_Area(self.throat_loc,bl_h,bl_g)
+    def throat_area(self,percent_obstruction,bl_g):
+        return self.geom_Area(self.throat_loc,percent_obstruction,bl_g)
     
     #hydraulic diameter 
-    def Dh(self, x: float, bl_h: float = 0.0, bl_growth: float = 0.0) -> float:
-        return np.sqrt(self.geom_Area(x,bl_h,bl_growth))
+    def Dh(self, x: float, percent_obstruction: float = 0.0, bl_growth: float = 0.0) -> float:
+        return np.sqrt(self.geom_Area(x,percent_obstruction,bl_growth))
 
     #dAdx func. Just using FDM for this - not actually deriving a true dAdx
-    def dAdx(self, x: float,bl_h: float,bl_growth: float,tol = 1e-3) -> float:
+    def dAdx(self, x: float,percent_obstruction: float,bl_growth: float,tol = 1e-3) -> float:
         region = self.geometry_regions(x)
 
         if region == "Preburner" or region == "Test Section":
@@ -192,7 +204,7 @@ class WindTunnelGeometry:
         elif region == "Throat" or region == "Conv Nozzle" or region == "Div Nozzle":
             xCurrent = x
             xPrev = x - max((x*tol),1e-9)
-            dA = self.geom_Area(xCurrent,bl_h,bl_growth) - self.geom_Area(xPrev,bl_h,bl_growth)
+            dA = self.geom_Area(xCurrent,percent_obstruction,bl_growth) - self.geom_Area(xPrev,percent_obstruction,bl_growth)
             return dA/(xCurrent - xPrev)
         
     #just splitting up geometry into sections that have diff Cfs 
@@ -435,28 +447,28 @@ class ForwardModel:
     #these are just shapiros 1d flow equations for generalized flow. I believe I am missing like two parts but yeah 
     #they are converted to from dV/V and dP/P to dV/dx and dP/dx
     def dVdX (self,V: float,A: float,M: float,T: float,P: float,mdot: float,dmdotDX: float,
-            Cf: float, x: float,dx: float,eta_total: float,combustion_end: float,bl_h: float,bl_growth: float) -> float: #first 4 parts of sharpios 1d flow eqn converted to dV/dx
+            Cf: float, x: float,dx: float,eta_total: float,combustion_end: float,percent_obstruction: float,bl_growth: float) -> float: #first 4 parts of sharpios 1d flow eqn converted to dV/dx
         gas_Prop = self.gas_properties(T, P, self.ICs.Y_mix)
         cp = gas_Prop["cp"]
         gamma = gas_Prop["gamma"]
 
-        term1 = ((-V)/(A * (1 - M**2)))* self.geometry.dAdx(x,bl_h,bl_growth)
+        term1 = ((-V)/(A * (1 - M**2)))* self.geometry.dAdx(x,percent_obstruction,bl_growth)
         term2 = ((V/((1-M**2) * cp * T)) * self.heat_release(x,dx,eta_total,combustion_end))
         term3 = ((gamma *M**2)/(2 * (1 - M**2)))
-        term4 = ((((4 * Cf * V)/self.geometry.Dh(x,bl_h,bl_growth))) - (2*(self.ICs.Vinj/mdot) * dmdotDX))
+        term4 = ((((4 * Cf * V)/self.geometry.Dh(x,percent_obstruction,bl_growth))) - (2*(self.ICs.Vinj/mdot) * dmdotDX))
         term5 = (((V*(1 + gamma * M**2))/((1-M**2)*mdot)) * (dmdotDX))
         return term1 + term2 + (term3*term4) + term5
 
     def dPdX (self,V: float,A: float,M: float,T: float,P: float,mdot: float,dmdotDX: float,
-            Cf: float, x: float,dx: float,eta_total: float,combustion_end: float,bl_h: float,bl_growth: float) -> float: #first 4 parts of sharpios 1d flow eqn converted to dP/dx
+            Cf: float, x: float,dx: float,eta_total: float,combustion_end: float,percent_obstruction: float,bl_growth: float) -> float: #first 4 parts of sharpios 1d flow eqn converted to dP/dx
         gas_Prop = self.gas_properties(T, P, self.ICs.Y_mix)
         cp = gas_Prop["cp"]
         gamma = gas_Prop["gamma"]
 
-        term1 = ((gamma * M**2 * P)/(A * (1 - M**2))) * self.geometry.dAdx(x,bl_h,bl_growth)
+        term1 = ((gamma * M**2 * P)/(A * (1 - M**2))) * self.geometry.dAdx(x,percent_obstruction,bl_growth)
         term2 = -(((gamma * M**2 * P)/((1-M**2) * cp * T)) * self.heat_release(x,dx,eta_total,combustion_end))
         term3  = -((gamma * M**2 * (1 + (gamma-1) * M**2))/(2 * (1 - M**2)))
-        term4 = (((4 * Cf * (P/self.geometry.Dh(x,bl_h,bl_growth)))) - (2 * ((self.ICs.Vinj * P)/(mdot * V)) * (dmdotDX)))
+        term4 = (((4 * Cf * (P/self.geometry.Dh(x,percent_obstruction,bl_growth)))) - (2 * ((self.ICs.Vinj * P)/(mdot * V)) * (dmdotDX)))
         term5 = -(((2 * gamma * M**2 * (1 + ((gamma-1)/2) *M**2)*P)/((1-M**2)*mdot)) * (dmdotDX))
         return term1 + term2 + (term3 * term4) + term5
 
@@ -538,29 +550,29 @@ class ForwardModel:
 
         return T_Guess
     #the point of this residual is to find a static pressure that is consistent with my inlet stagnation pressure 
-    def pressureResidual(self,Pstag: float,P_guess: float,T: float,gamma: float, bl_h, bl_g) -> float:
+    def pressureResidual(self,Pstag: float,P_guess: float,T: float,gamma: float, percent_obstruction, bl_g) -> float:
         #mdot * R * T / ( P * A) = u
-        u = (self.ICs.mdot_i * self.ICs.R_mix * T)/(P_guess * self.geometry.inlet_area(bl_h,bl_g))
+        u = (self.ICs.mdot_i * self.ICs.R_mix * T)/(P_guess * self.geometry.inlet_area(percent_obstruction,bl_g))
 
         M = mNum(u, soS(T, self.ICs.R_mix, gamma))
         PstaticfromPstag = Pstag / (1 + 0.5 * (gamma - 1) * M**2)**(gamma/(gamma-1))
 
         return PstaticfromPstag - P_guess
 
-    def newtonRaphson_P(self,P_guess: float, Pstag: float, T: float, gamma: float, bl_h, bl_g) -> float:
+    def newtonRaphson_P(self,P_guess: float, Pstag: float, T: float, gamma: float, percent_obstruction, bl_g) -> float:
         numIters = 0
         tol = 1e-8
-        E = self.pressureResidual(Pstag, P_guess, T, gamma, bl_h, bl_g)
+        E = self.pressureResidual(Pstag, P_guess, T, gamma, percent_obstruction, bl_g)
 
         P_vals = np.linspace(0.01 * Pstag, 0.999999 * Pstag, 500)
 
-        E_vals = [self.pressureResidual(Pstag, P, T, gamma, bl_h, bl_g)for P in P_vals]
+        E_vals = [self.pressureResidual(Pstag, P, T, gamma, percent_obstruction, bl_g)for P in P_vals]
 
        
         while abs(E) >= tol and numIters <= 100:
             deltaP = max(abs(P_guess)*1e-6, 1e-6)
 
-            dEdP = (self.pressureResidual(Pstag, P_guess + deltaP, T, gamma, bl_h, bl_g) - E)/deltaP
+            dEdP = (self.pressureResidual(Pstag, P_guess + deltaP, T, gamma, percent_obstruction, bl_g) - E)/deltaP
 
             if not np.isfinite(dEdP) or abs(dEdP) < 1e-14:
                 raise RuntimeError("Bad pressure Newton derivative")
@@ -572,7 +584,7 @@ class ForwardModel:
                 if P_new <= 0 or not np.isfinite(P_new) or P_new > 3*Pstag:
                     lamda *= 0.5
                     continue
-                E_new = self.pressureResidual(Pstag, P_new, T, gamma, bl_h, bl_g)
+                E_new = self.pressureResidual(Pstag, P_new, T, gamma, percent_obstruction, bl_g)
                 #print("P_new", P_new,"lamda", lamda,"E_new", E_new)
 
                 if np.isfinite(E_new) and abs(E_new) < abs(E):
@@ -595,10 +607,9 @@ class ForwardModel:
 
     #rk45
     def rk45Step(self,V: float,P: float,Cf_sampling: float, h: float, x: float, T_preburner: float
-                ,eta_total: float,combustion_end: float,bl_h: float,bl_growth: float) -> tuple[float,float,float,float,float,str]: #add stages for each mdot 3
+                ,eta_total: float,combustion_end: float,percent_obstruction: float,bl_growth: float) -> tuple[float,float,float,float,float,str]: #add stages for each mdot 3
         accepted = False 
         location,local_tol,h_max = self.geometry.geometry_regions(x)
-        #print("V",V,"P",P,"x",x,"T_preburner",T_preburner,"eta_total",eta_total,"combustion_end",combustion_end,"bl_h",bl_h,"bl_growth",bl_growth)
     
         h = min(h,h_max)
         attempts = 0
@@ -614,11 +625,15 @@ class ForwardModel:
                     f"combustion_end={combustion_end}")
             
             if h < 1e-14:
-                raise RuntimeError(f"RK45 step size got too small at x = {x:.4f}")
-                
+                raise RuntimeError(f"RK45 step size got too small at x = {x:.4f}"
+                                   f" bl_growth = {bl_growth}, percent_obstruction = {percent_obstruction} "
+                                   f"Cf_sampling={Cf_sampling}, eta_total={eta_total}, combustion_end={combustion_end}"
+                                   f" V={V}, P= {P}, T_preburner={T_preburner}")
+                        
+
             x1 = x
             Cf1 = self.friction(x1,Cf_sampling)
-            A1 = self.geometry.geom_Area(x1,bl_h,bl_growth)
+            A1 = self.geometry.geom_Area(x1,percent_obstruction,bl_growth)
             V1 = V
             P1 =  P
 
@@ -632,12 +647,12 @@ class ForwardModel:
             mdot_1Cur = self.mdotFuncX(x1)
             mdot_1Prev = self.mdotFuncX(x-h)  
             M1 = mNum(V1,a1)
-            k1V = h * self.dVdX(V1,A1,M1,T1,P1,mdot_1Cur,self.delMdotdx(mdot_1Cur,mdot_1Prev,x1,x1-h),Cf1,x1,h,eta_total,combustion_end,bl_h,bl_growth)
-            k1P = h * self.dPdX(V1,A1,M1,T1,P1,mdot_1Cur,self.delMdotdx(mdot_1Cur,mdot_1Prev,x1,x1-h),Cf1,x1,h,eta_total,combustion_end,bl_h,bl_growth)
+            k1V = h * self.dVdX(V1,A1,M1,T1,P1,mdot_1Cur,self.delMdotdx(mdot_1Cur,mdot_1Prev,x1,x1-h),Cf1,x1,h,eta_total,combustion_end,percent_obstruction,bl_growth)
+            k1P = h * self.dPdX(V1,A1,M1,T1,P1,mdot_1Cur,self.delMdotdx(mdot_1Cur,mdot_1Prev,x1,x1-h),Cf1,x1,h,eta_total,combustion_end,percent_obstruction,bl_growth)
 
             x2 = x1 + 1/5 * h
             Cf2 = self.friction(x2,Cf_sampling)
-            A2 = self.geometry.geom_Area(x2,bl_h,bl_growth)
+            A2 = self.geometry.geom_Area(x2,percent_obstruction,bl_growth)
             V2 = V + 1/5 * k1V 
             P2 = P + 1/5 * k1P
             try:
@@ -649,13 +664,13 @@ class ForwardModel:
             M2 = mNum(V2,a2)
             mdot_2Cur = self.mdotFuncX(x2)
             mdot_2Prev = self.mdotFuncX(x1) 
-            k2V = h * self.dVdX(V2,A2,M2,T2,P2,mdot_2Cur,self.delMdotdx(mdot_2Cur,mdot_2Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,combustion_end,bl_h,bl_growth)
-            k2P = h * self.dPdX(V2,A2,M2,T2,P2,mdot_2Cur,self.delMdotdx(mdot_2Cur,mdot_2Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,combustion_end,bl_h,bl_growth)
+            k2V = h * self.dVdX(V2,A2,M2,T2,P2,mdot_2Cur,self.delMdotdx(mdot_2Cur,mdot_2Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,combustion_end,percent_obstruction,bl_growth)
+            k2P = h * self.dPdX(V2,A2,M2,T2,P2,mdot_2Cur,self.delMdotdx(mdot_2Cur,mdot_2Prev,x2,x1),Cf2,x2,1/5 * h,eta_total,combustion_end,percent_obstruction,bl_growth)
 
             x3 = x1 + 3/10 * h
             Cf3 = self.friction(x3,Cf_sampling)
 
-            A3 = self.geometry.geom_Area(x3,bl_h,bl_growth)
+            A3 = self.geometry.geom_Area(x3,percent_obstruction,bl_growth)
             V3 = V + 3/40 * k1V + 9/40 * k2V
             P3 = P + 3/40 * k1P + 9/40 * k2P
             try:
@@ -667,12 +682,12 @@ class ForwardModel:
             M3 = mNum(V3,a3)
             mdot_3Cur = self.mdotFuncX(x3)
             mdot_3Prev = self.mdotFuncX(x1) 
-            k3V = h * self.dVdX(V3,A3,M3,T3,P3,mdot_3Cur,self.delMdotdx(mdot_3Cur,mdot_3Prev,x3,x2),Cf3,x3,3/10 * h,eta_total,combustion_end,bl_h,bl_growth)
-            k3P = h *self. dPdX(V3,A3,M3,T3,P3,mdot_3Cur,self.delMdotdx(mdot_3Cur,mdot_3Prev,x3,x2),Cf3,x3,3/10 * h,eta_total,combustion_end,bl_h,bl_growth)
+            k3V = h * self.dVdX(V3,A3,M3,T3,P3,mdot_3Cur,self.delMdotdx(mdot_3Cur,mdot_3Prev,x3,x2),Cf3,x3,3/10 * h,eta_total,combustion_end,percent_obstruction,bl_growth)
+            k3P = h *self. dPdX(V3,A3,M3,T3,P3,mdot_3Cur,self.delMdotdx(mdot_3Cur,mdot_3Prev,x3,x2),Cf3,x3,3/10 * h,eta_total,combustion_end,percent_obstruction,bl_growth)
 
             x4 = x1 + 4/5 * h
             Cf4 = self.friction(x4,Cf_sampling)
-            A4 = self.geometry.geom_Area(x4,bl_h,bl_growth)
+            A4 = self.geometry.geom_Area(x4,percent_obstruction,bl_growth)
 
             V4 = V + 44/45 * k1V - 56/15 * k2V + 32/9 * k3V
             P4 = P + 44/45 * k1P - 56/15 * k2P + 32/9 * k3P
@@ -685,12 +700,12 @@ class ForwardModel:
             M4 = mNum(V4,a4)
             mdot_4Cur = self.mdotFuncX(x4)
             mdot_4Prev = self.mdotFuncX(x1) 
-            k4V = h * self.dVdX(V4,A4,M4,T4,P4,mdot_4Cur,self.delMdotdx(mdot_4Cur,mdot_4Prev,x4,x3),Cf4,x4,4/5 * h,eta_total,combustion_end,bl_h,bl_growth)
-            k4P = h * self.dPdX(V4,A4,M4,T4,P4,mdot_4Cur,self.delMdotdx(mdot_4Cur,mdot_4Prev,x4,x3),Cf4,x4,4/5 * h,eta_total,combustion_end,bl_h,bl_growth)
+            k4V = h * self.dVdX(V4,A4,M4,T4,P4,mdot_4Cur,self.delMdotdx(mdot_4Cur,mdot_4Prev,x4,x3),Cf4,x4,4/5 * h,eta_total,combustion_end,percent_obstruction,bl_growth)
+            k4P = h * self.dPdX(V4,A4,M4,T4,P4,mdot_4Cur,self.delMdotdx(mdot_4Cur,mdot_4Prev,x4,x3),Cf4,x4,4/5 * h,eta_total,combustion_end,percent_obstruction,bl_growth)
 
             x5 = x1 + 8/9 * h
             Cf5 = self.friction(x5,Cf_sampling)
-            A5 = self.geometry.geom_Area(x5,bl_h,bl_growth)
+            A5 = self.geometry.geom_Area(x5,percent_obstruction,bl_growth)
 
             V5 = V + 19372/6561 * k1V - 25360/2187 * k2V + 64448/6561 * k3V - 212/729 * k4V
             P5 = P + 19372/6561 * k1P - 25360/2187 * k2P + 64448/6561 * k3P - 212/729 * k4P
@@ -705,12 +720,12 @@ class ForwardModel:
             M5 = mNum(V5,a5)
             mdot_5Cur = self.mdotFuncX(x5)
             mdot_5Prev = self.mdotFuncX(x1) 
-            k5V = h * self.dVdX(V5,A5,M5,T5,P5,mdot_5Cur,self.delMdotdx(mdot_5Cur,mdot_5Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,combustion_end,bl_h,bl_growth)
-            k5P = h * self.dPdX(V5,A5,M5,T5,P5,mdot_5Cur,self.delMdotdx(mdot_5Cur,mdot_5Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,combustion_end,bl_h,bl_growth)
+            k5V = h * self.dVdX(V5,A5,M5,T5,P5,mdot_5Cur,self.delMdotdx(mdot_5Cur,mdot_5Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,combustion_end,percent_obstruction,bl_growth)
+            k5P = h * self.dPdX(V5,A5,M5,T5,P5,mdot_5Cur,self.delMdotdx(mdot_5Cur,mdot_5Prev,x5,x1),Cf5,x5,8/9 * h,eta_total,combustion_end,percent_obstruction,bl_growth)
 
             x6 = x1 + h
             Cf6 = self.friction(x6,Cf_sampling)
-            A6 = self.geometry.geom_Area(x6,bl_h,bl_growth)
+            A6 = self.geometry.geom_Area(x6,percent_obstruction,bl_growth)
 
             V6 = V + 9017/3168 * k1V - 355/33 * k2V + 46732/5247 * k3V + 49/176 * k4V - 5103/18656 * k5V
             P6 = P + 9017/3168 * k1P - 355/33 * k2P + 46732/5247 * k3P + 49/176 * k4P - 5103/18656 * k5P
@@ -724,8 +739,8 @@ class ForwardModel:
             M6 = mNum(V6,a6)
             mdot_6Cur = self.mdotFuncX(x6)
             mdot_6Prev = self.mdotFuncX(x1) 
-            k6V = h * self.dVdX(V6,A6,M6,T6,P6,mdot_6Cur,self.delMdotdx(mdot_6Cur,mdot_6Prev,x6,x1),Cf6,x6,h,eta_total,combustion_end,bl_h,bl_growth)
-            k6P = h * self.dPdX(V6,A6,M6,T6,P6,mdot_6Cur,self.delMdotdx(mdot_6Cur,mdot_6Prev,x6,x1),Cf6,x6,h,eta_total,combustion_end,bl_h,bl_growth)
+            k6V = h * self.dVdX(V6,A6,M6,T6,P6,mdot_6Cur,self.delMdotdx(mdot_6Cur,mdot_6Prev,x6,x1),Cf6,x6,h,eta_total,combustion_end,percent_obstruction,bl_growth)
+            k6P = h * self.dPdX(V6,A6,M6,T6,P6,mdot_6Cur,self.delMdotdx(mdot_6Cur,mdot_6Prev,x6,x1),Cf6,x6,h,eta_total,combustion_end,percent_obstruction,bl_growth)
 
             #5th order solution 
             v_5Order = V + 35/384 * k1V + 500/1113 * k3V + 125/192 * k4V - 2187/6784 * k5V + 11/84 * k6V
@@ -733,7 +748,7 @@ class ForwardModel:
 
             x7 = x1 + h
             Cf7 = self.friction(x7,Cf_sampling)
-            A7 = self.geometry.geom_Area(x7,bl_h,bl_growth)
+            A7 = self.geometry.geom_Area(x7,percent_obstruction,bl_growth)
             V7 = v_5Order
             P7 = p_5Order
             try:
@@ -745,8 +760,8 @@ class ForwardModel:
             M7 = mNum(V7,a7)
             mdot_7Cur = self.mdotFuncX(x7)
             mdot_7Prev = self.mdotFuncX(x1) 
-            k7V = h * self.dVdX(V7,A7,M7,T7,P7,mdot_7Cur,self.delMdotdx(mdot_7Cur,mdot_7Prev,x7,x1),Cf7,x7,h,eta_total,combustion_end,bl_h,bl_growth)
-            k7P = h * self.dPdX(V7,A7,M7,T7,P7,mdot_7Cur,self.delMdotdx(mdot_7Cur,mdot_7Prev,x7,x1),Cf7,x7,h,eta_total,combustion_end,bl_h,bl_growth)
+            k7V = h * self.dVdX(V7,A7,M7,T7,P7,mdot_7Cur,self.delMdotdx(mdot_7Cur,mdot_7Prev,x7,x1),Cf7,x7,h,eta_total,combustion_end,percent_obstruction,bl_growth)
+            k7P = h * self.dPdX(V7,A7,M7,T7,P7,mdot_7Cur,self.delMdotdx(mdot_7Cur,mdot_7Prev,x7,x1),Cf7,x7,h,eta_total,combustion_end,percent_obstruction,bl_growth)
 
             #4th order solution
             v_4Order = V + 5179/57600 * k1V + 7571/16695 * k3V + 393/640 * k4V - 92097/339200 * k5V + 187/2100 * k6V + 1/40 * k7V
@@ -782,13 +797,13 @@ class ForwardModel:
         return xNext, Vnext, Pnext, Tnext,h_next, location
 
     #Full Solver
-    def solver(self,Preburner_TStag: float,Cf_sampling: float,eta_total: float,combustion_end: float,bl_h: float,
+    def solver(self,Preburner_TStag: float,Cf_sampling: float,eta_total: float,combustion_end: float,percent_obstruction: float,
             bl_growth: float,scale: float, acceptedScale: bool, supersonicSolve: bool) -> dict[str, Any]:
         inlet_T = Preburner_TStag #k
 
         if self.config.geometry_type == "wind_tunnel":
-            Preburner_predictedPStag = self.pstag_predicted(self.ICs.mdot_i, self.geometry.throat_area(bl_h,bl_growth), Preburner_TStag, self.gas_properties(Preburner_TStag, 101325, self.ICs.Y_mix)["gamma"])
-            og_Preburner_P = self.newtonRaphson_P(Preburner_predictedPStag,Preburner_predictedPStag, inlet_T, self.gas_properties(inlet_T, 101325, self.ICs.Y_mix)["gamma"],bl_h, bl_growth)
+            Preburner_predictedPStag = self.pstag_predicted(self.ICs.mdot_i, self.geometry.throat_area(percent_obstruction,bl_growth), Preburner_TStag, self.gas_properties(Preburner_TStag, 101325, self.ICs.Y_mix)["gamma"])
+            og_Preburner_P = self.newtonRaphson_P(Preburner_predictedPStag,Preburner_predictedPStag, inlet_T, self.gas_properties(inlet_T, 101325, self.ICs.Y_mix)["gamma"],percent_obstruction, bl_growth)
 
             if acceptedScale == False:
                 if scale ==1:
@@ -796,11 +811,11 @@ class ForwardModel:
                 else:
                     Preburner_P = og_Preburner_P * scale
 
-                Preburner_U = self.ICs.mdot_i/(Preburner_P * self.geometry.inlet_area(bl_h, bl_growth) / (self.ICs.R_mix * inlet_T))
+                Preburner_U = self.ICs.mdot_i/(Preburner_P * self.geometry.inlet_area(percent_obstruction, bl_growth) / (self.ICs.R_mix * inlet_T))
                 Preburner_gasProperties = self.gas_properties(inlet_T, Preburner_P, self.ICs.Y_mix)
 
                 M_Preburner_Inlet = Preburner_U/soS(inlet_T,self.ICs.R_mix,Preburner_gasProperties["gamma"])
-                rho_preburner = self.ICs.mdot_i/(self.geometry.inlet_area(bl_h, bl_growth) * Preburner_U)
+                rho_preburner = self.ICs.mdot_i/(self.geometry.inlet_area(percent_obstruction, bl_growth) * Preburner_U)
                 Preburner_Pstag = Preburner_predictedPStag
 
                 inlet_U = Preburner_U
@@ -813,9 +828,9 @@ class ForwardModel:
             elif acceptedScale == True:
                 Preburner_P = og_Preburner_P * scale
                 Preburner_gasProperties = self.gas_properties(inlet_T, Preburner_P, self.ICs.Y_mix)
-                Preburner_U = self.ICs.mdot_i/(Preburner_P * self.geometry.inlet_area(bl_h, bl_growth) / (self.ICs.R_mix * inlet_T))
+                Preburner_U = self.ICs.mdot_i/(Preburner_P * self.geometry.inlet_area(percent_obstruction, bl_growth) / (self.ICs.R_mix * inlet_T))
                 M_Preburner_Inlet = Preburner_U/soS(inlet_T,self.ICs.R_mix,Preburner_gasProperties["gamma"])
-                rho_preburner = self.ICs.mdot_i/(self.geometry.inlet_area(bl_h, bl_growth) * Preburner_U)
+                rho_preburner = self.ICs.mdot_i/(self.geometry.inlet_area(percent_obstruction, bl_growth) * Preburner_U)
                 Preburner_Pstag = self.pressureStagFunc(Preburner_P,M_Preburner_Inlet,Preburner_gasProperties["gamma"])
 
                 inlet_U = Preburner_U
@@ -829,19 +844,20 @@ class ForwardModel:
 
         elif self.config.geometry_type == "constant_area":
             inlet_Tstag = Preburner_TStag
-            inlet_Pstag = self.pstag_predicted(self.ICs.mdot_i, self.geometry.smallest_eff_area(bl_h,bl_growth), 
+            inlet_Pstag = self.pstag_predicted(self.ICs.mdot_i, self.geometry.smallest_eff_area(percent_obstruction,bl_growth), 
                                                inlet_Tstag, self.gas_properties(inlet_Tstag, 101325, self.ICs.Y_mix)["gamma"])
             #inlet_P = self.newtonRaphson_P(inlet_Pstag,inlet_Pstag, inlet_T, 
-                                #           self.gas_properties(inlet_T, 101325, self.ICs.Y_mix)["gamma"],bl_h, bl_growth)
+                                #           self.gas_properties(inlet_T, 101325, self.ICs.Y_mix)["gamma"],percent_obstruction, bl_growth)
             inlet_P = 0.99* inlet_Pstag
             inlet_gasProperties = self.gas_properties(inlet_T, inlet_P, self.ICs.Y_mix)
             
-            inlet_U = self.ICs.mdot_i/(inlet_P * self.geometry.inlet_area(bl_h, bl_growth) / (self.ICs.R_mix * inlet_T))
+            inlet_U = self.ICs.mdot_i/(inlet_P * self.geometry.inlet_area(percent_obstruction, bl_growth) / (self.ICs.R_mix * inlet_T))
             inlet_M = inlet_U/soS(inlet_T,self.ICs.R_mix,inlet_gasProperties["gamma"])
-            inlet_rho = self.ICs.mdot_i/(self.geometry.inlet_area(bl_h, bl_growth) * inlet_U)
+            inlet_rho = self.ICs.mdot_i/(self.geometry.inlet_area(percent_obstruction, bl_growth) * inlet_U)
+            #think about getting ride of this sonic solve stuff
             sonicSolveCount = 0
             dataGatherCounter = 0
-            PT_locations = [0.1,0.2,0.25,0.3,0.35,0.4,0.5,0.6,0.7,0.9]
+            PT_locations = [0.1,0.2,0.3,0.5,0.5,0.6,0.7,0.8,0.9,self.geometry.solver_end_location]
 
             
         temp = [inlet_T]                # creating fresh arrays in function 
@@ -851,7 +867,7 @@ class ForwardModel:
         tStag = [inlet_Tstag]
         machNum = [inlet_M]
         density = [inlet_rho]
-        areaList = [self.geometry.geom_Area(0,bl_h,bl_growth)]
+        areaList = [self.geometry.geom_Area(0,percent_obstruction,bl_growth)]
         dAdxList = [0.0]
         areaRatio = [1.0]
         xList = [0.0] #this list starts at the preburner 
@@ -861,8 +877,6 @@ class ForwardModel:
         pt_location = []
         pt_pressures = []
         
-
-
         sInitial = self.gas_properties(inlet_T, inlet_P,self.ICs.Y_mix)["s"]
         entropy = [sInitial]
 
@@ -896,18 +910,17 @@ class ForwardModel:
                     f"V={velocities[-1]},\n"
                     f"P={pressure[-1]},\n"
                     f"T={temp[-1]},\n"
-                    f"Area={self.geometry.geom_Area(xList[-1],bl_h,bl_growth)},\n"
-                    f"dAdx={self.geometry.dAdx(xList[-1],bl_h,bl_growth)},\n"
+                    f"Area={self.geometry.geom_Area(xList[-1],percent_obstruction,bl_growth)},\n"
+                    f"dAdx={self.geometry.dAdx(xList[-1],percent_obstruction,bl_growth)},\n"
                     f"location={self.geometry.geometry_regions(xList[-1])},\n"
                     f"acceptedScale={acceptedScale},\n"
                     f"supersonicSolve={supersonicSolve},\n"
                     f"Cf_sampling={Cf_sampling},\n"
                     f"eta_total={eta_total},\n"
                     f"combustion_end={combustion_end},\n"
-                    f"bl_h={bl_h},\n"
+                    f"percent_obstruction={percent_obstruction},\n"
                     f"bl_growth={bl_growth}\n")'''
                     
-
             xPrev = xList[-1]     
             hPrev = stepList[-1] #from step 0 to step 1 and then step 1 to step 2 etc 
             
@@ -916,8 +929,7 @@ class ForwardModel:
             Tbefore = temp [-1]
             
             xNext, VCurrent, PCurrent, TCurrent, hNext, location = self.rk45Step(Vbefore,Pbefore,Cf_sampling,hPrev, 
-                                                                                 xPrev,Tbefore,eta_total,combustion_end,bl_h,bl_growth)
-
+                                                                                 xPrev,Tbefore,eta_total,combustion_end,percent_obstruction,bl_growth)
             if location == "Preburner":
                 pb_count +=1
             elif location == "Throat":
@@ -933,8 +945,8 @@ class ForwardModel:
             xList.append(xNext)
             xCurrent = xList[-1]
 
-            areaList.append(self.geometry.geom_Area(xCurrent,bl_h,bl_growth))
-            dAdxList.append(self.geometry.dAdx(xCurrent,bl_h,bl_growth))
+            areaList.append(self.geometry.geom_Area(xCurrent,percent_obstruction,bl_growth))
+            dAdxList.append(self.geometry.dAdx(xCurrent,percent_obstruction,bl_growth))
 
             mdotlocal = self.mdotFuncX(xCurrent)
             stepList.append(hNext)
@@ -942,12 +954,12 @@ class ForwardModel:
             velocities.append(VCurrent)
             pressure.append(PCurrent)
 
-            rhoCurrent = mdotlocal/(self.geometry.geom_Area(xCurrent,bl_h,bl_growth) * VCurrent) 
+            rhoCurrent = mdotlocal/(self.geometry.geom_Area(xCurrent,percent_obstruction,bl_growth) * VCurrent) 
             density.append(rhoCurrent)
 
             temp.append(TCurrent)
 
-            mdotReconstructed.append(rhoCurrent * VCurrent * self.geometry.geom_Area(xCurrent,bl_h,bl_growth))
+            mdotReconstructed.append(rhoCurrent * VCurrent * self.geometry.geom_Area(xCurrent,percent_obstruction,bl_growth))
             mdotList.append(self.mdotFuncX(xCurrent))
 
             aCurrent = soS(TCurrent,self.ICs.R_mix,currentMix_gamma)
@@ -987,9 +999,9 @@ class ForwardModel:
                     P_new, T_New = self.stagtostatic(throatPstag,throatTstag,MachN,throatMix_gamma)
                     V_new = MachN * soS(T_New,self.ICs.R_mix,throatMix_gamma)
                     xEndofThroat = self.geometry.throat_loc + 0.005
-                    rho_New = mdotlocal/(self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth) * V_new)
+                    rho_New = mdotlocal/(self.geometry.geom_Area(xEndofThroat,percent_obstruction,bl_growth) * V_new)
 
-                    mdotReconstructed.append(rho_New * V_new * self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth))
+                    mdotReconstructed.append(rho_New * V_new * self.geometry.geom_Area(xEndofThroat,percent_obstruction,bl_growth))
                     mdotList.append(self.mdotFuncX(xEndofThroat))
                     stepList.append(0.001)
                     xList.append(xEndofThroat)
@@ -1001,8 +1013,8 @@ class ForwardModel:
                     pStag.append(throatPstag)
                     tStag.append(throatTstag)
                     entropy.append(entropy_throat)
-                    areaList.append(self.geometry.geom_Area(xEndofThroat,bl_h,bl_growth))
-                    dAdxList.append(self.geometry.dAdx(xEndofThroat,bl_h,bl_growth))
+                    areaList.append(self.geometry.geom_Area(xEndofThroat,percent_obstruction,bl_growth))
+                    dAdxList.append(self.geometry.dAdx(xEndofThroat,percent_obstruction,bl_growth))
 
                     pt_P, pt_x = pressureTap(xList[-2],pressure[-2],xEndofThroat, P_new,PT_locations)
                     if pt_P is not None:
@@ -1020,92 +1032,12 @@ class ForwardModel:
                     pt_location.append(pt_x)
                     pt_pressures.append(pt_P)
 
-                if len(pt_location) > 3 and dataGatherCounter == 0:
+                if len(pt_location) > 8 and dataGatherCounter == 0:
                     dynamic_viscosity = self.gas_properties(temp[-1],pressure[-1],self.ICs.Y_mix)["mu"]
                     d_tube = np.sqrt(self.geometry.tube_area)
                     Re = density[-1] * velocities[-1] * d_tube / dynamic_viscosity
                     data_vector = np.array([Re, machNum[-1],temp[-1],xList[-1]])
                     dataGatherCounter += 1
-
-
-                #1st mach num crossing 
-                if 0.995 <  MCurrent < 1.00 and (sonicSolveCount == 0 or sonicSolveCount > 1): 
-                    sonicSolveCount = 1
-                    pre_chokeP = pressure[-1]
-                    pre_chokeT = temp[-1]
-                    pre_chokePstag = pStag[-1]
-                    pre_chokeTstag = tStag[-1]
-                    pre_chokeX = xList[-1]
-                    MachN = 1.0001
-                    choke_Mix_properties = self.gas_properties(pre_chokeT, pre_chokeP,self.ICs.Y_mix)
-                    choke_Mix_gamma = choke_Mix_properties["gamma"]
-                    choke_entropy = choke_Mix_properties["s"]
-
-                    P_new, T_New = self.stagtostatic(pre_chokePstag,pre_chokeTstag,MachN,choke_Mix_gamma)
-                    V_new = MachN * soS(T_New,self.ICs.R_mix,choke_Mix_gamma)
-                    post_chokeX = pre_chokeX + (self.geometry.solver_end_location)/100
-                    rho_New = mdotlocal/(self.geometry.geom_Area(post_chokeX,bl_h,bl_growth) * V_new)
-
-                    mdotReconstructed.append(rho_New * V_new * self.geometry.geom_Area(post_chokeX,bl_h,bl_growth))
-                    mdotList.append(self.mdotFuncX(post_chokeX))
-                    stepList.append(0.001)
-                    xList.append(post_chokeX)
-                    pressure.append(P_new)
-                    velocities.append(V_new)
-                    temp.append(T_New)
-                    density.append(rho_New)
-                    machNum.append(MachN)
-                    pStag.append(pre_chokePstag)
-                    tStag.append(pre_chokeTstag)
-                    entropy.append(choke_entropy)
-                    areaList.append(self.geometry.geom_Area(post_chokeX,bl_h,bl_growth))
-                    dAdxList.append(self.geometry.dAdx(post_chokeX,bl_h,bl_growth))
-
-                    pt_P, pt_x = pressureTap(xList[-2],pressure[-2],post_chokeX, P_new,PT_locations)
-
-                    if pt_P is not None:
-                        pt_location.append(pt_x)
-                        pt_pressures.append(pt_P)
-
-                elif 1.00 < MCurrent < 1.005 and (sonicSolveCount == 1 or sonicSolveCount > 1):
-                    sonicSolveCount = 2
-                    post_chokeP = pressure[-1]
-                    post_chokeT = temp[-1]
-                    post_chokePstag = pStag[-1]
-                    post_chokeTstag = tStag[-1]
-                    post_chokeX = xList[-1]
-                    MachN = 0.9999
-                    choke_Mix_properties = self.gas_properties(post_chokeT, post_chokeP,self.ICs.Y_mix)
-                    choke_Mix_gamma = choke_Mix_properties["gamma"]
-                    choke_entropy = choke_Mix_properties["s"]
-
-                    P_new, T_New = self.stagtostatic(post_chokePstag,post_chokeTstag,MachN,choke_Mix_gamma)
-                    V_new = MachN * soS(T_New,self.ICs.R_mix,choke_Mix_gamma)
-                    pre_chokeX = post_chokeX + (self.geometry.solver_end_location)/100
-                    rho_New = mdotlocal/(self.geometry.geom_Area(pre_chokeX,bl_h,bl_growth) * V_new)
-
-                    mdotReconstructed.append(rho_New * V_new * self.geometry.geom_Area(pre_chokeX,bl_h,bl_growth))
-                    mdotList.append(self.mdotFuncX(pre_chokeX))
-                    stepList.append(0.001)
-                    xList.append(pre_chokeX)
-                    pressure.append(P_new)
-                    velocities.append(V_new)
-                    temp.append(T_New)
-                    density.append(rho_New)
-                    machNum.append(MachN)
-                    pStag.append(post_chokePstag)
-                    tStag.append(post_chokeTstag)
-                    entropy.append(choke_entropy)
-                    areaList.append(self.geometry.geom_Area(pre_chokeX,bl_h,bl_growth))
-                    dAdxList.append(self.geometry.dAdx(pre_chokeX,bl_h,bl_growth))
-
-                    pt_P, pt_x = pressureTap(xList[-2],pressure[-2],pre_chokeX, P_new,PT_locations)
-
-                    if pt_P is not None:
-                        pt_location.append(pt_x)
-                        pt_pressures.append(pt_P)
-                else:
-                    continue 
 
         #converting to np arrays
         V_List = np.array(velocities)
@@ -1153,26 +1085,26 @@ class ForwardModel:
             "data_vector": data_vector if self.config.geometry_type == "constant_area" else None}
     
     #Sweeping
-    def chokedLocationResiduals(self,scale: float, Cf_sampling: float,eta_total: float,combustion_end: float,bl_h: float,bl_growth: float) -> float:
-        results = self.solver(self.ICs.TstagAir,Cf_sampling,eta_total,combustion_end,bl_h,bl_growth,scale,False,False)
+    def chokedLocationResiduals(self,scale: float, Cf_sampling: float,eta_total: float,combustion_end: float,percent_obstruction: float,bl_growth: float) -> float:
+        results = self.solver(self.ICs.TstagAir,Cf_sampling,eta_total,combustion_end,percent_obstruction,bl_growth,scale,False,False)
         x_Choke = results["x"][-1]
         residual = self.geometry.throat_loc - x_Choke  #we want this to be zero
         return residual
         
-    def eval_scale(self,scale: float,Cf_sampling: float,eta_total: float,combustion_end: float,bl_h: float,bl_growth: float) -> tuple[float,float]:
+    def eval_scale(self,scale: float,Cf_sampling: float,eta_total: float,combustion_end: float,percent_obstruction: float,bl_growth: float) -> tuple[float,float]:
         try:
-            res = self.chokedLocationResiduals(scale, Cf_sampling,eta_total,combustion_end,bl_h,bl_growth)
+            res = self.chokedLocationResiduals(scale, Cf_sampling,eta_total,combustion_end,percent_obstruction,bl_growth)
             return scale, res
         except Exception as eS:
             print("Scale Failed ", scale, eS)
             traceback.print_exc()
             return scale, np.nan
         
-    def scaling_InletPressure_NOTPar(self,Cf_sampling: float, eta_total: float, combustion_end: float, bl_h: float, bl_growth: float) -> tuple[float,float,float,float]:
+    def scaling_InletPressure_NOTPar(self,Cf_sampling: float, eta_total: float, combustion_end: float, percent_obstruction: float, bl_growth: float) -> tuple[float,float,float,float]:
 
         max_scale = 1.0
         max_res = self.chokedLocationResiduals(
-            max_scale, Cf_sampling, eta_total, combustion_end, bl_h, bl_growth
+            max_scale, Cf_sampling, eta_total, combustion_end, percent_obstruction, bl_growth
         )
 
         if max_res > 0:
@@ -1189,7 +1121,7 @@ class ForwardModel:
             try:
                 cur_scale = max_scale + direction * (i / 10)
                 cur_scale, cur_res = self.eval_scale(
-                    cur_scale, Cf_sampling, eta_total, combustion_end, bl_h, bl_growth
+                    cur_scale, Cf_sampling, eta_total, combustion_end, percent_obstruction, bl_growth
                 )
             except Exception as eS:
                 print(f"Failed because of: {eS}")
@@ -1222,7 +1154,7 @@ class ForwardModel:
 
 
     def scale_HybridNewBisec(self,scale_low: float, scale_high: float,res_low: float, res_high: float,
-                            Cf_sampling: float,eta_total: float,combustion_end: float,bl_h: float,bl_growth: float) -> tuple[float,float]:
+                            Cf_sampling: float,eta_total: float,combustion_end: float,percent_obstruction: float,bl_growth: float) -> tuple[float,float]:
 
         tol = 1e-6
         maxIters = 100
@@ -1260,7 +1192,7 @@ class ForwardModel:
             else:
                 scale_candidate = 0.5 * (scale_low + scale_high)
 
-            res_candidate = self.chokedLocationResiduals(scale_candidate, Cf_sampling,eta_total,combustion_end,bl_h,bl_growth)
+            res_candidate = self.chokedLocationResiduals(scale_candidate, Cf_sampling,eta_total,combustion_end,percent_obstruction,bl_growth)
 
             # Track best residual seen
             if abs(res_candidate) < abs(best_res):
@@ -1289,10 +1221,10 @@ class ForwardModel:
     def run(self,percent_obstruction: float,Cf_sampling: float,eta_total: float,combustion_end: float,bl_growth: float,) -> dict[str, Any]:
 
         if self.config.boundary_layer:
-            bl_h = self.geometry.bl_height(percent_obstruction)
+            percent_obstruction = percent_obstruction
             effective_bl_growth = bl_growth
         else:
-            bl_h = 0.0
+            percent_obstruction = 0.0
             effective_bl_growth = 0.0
 
         if self.config.geometry_type == "wind_tunnel":
@@ -1300,7 +1232,7 @@ class ForwardModel:
             start_time_total =  time.perf_counter()
             start_time_scaling = time.perf_counter()
 
-            scale_low, scale_high, res_low, res_high = (self.scaling_InletPressure_NOTPar(Cf_sampling,eta_total,combustion_end,bl_h,effective_bl_growth,))
+            scale_low, scale_high, res_low, res_high = (self.scaling_InletPressure_NOTPar(Cf_sampling,eta_total,combustion_end,percent_obstruction,effective_bl_growth,))
             end_time_scaling = time.perf_counter()
 
             if res_low * res_high > 0:
@@ -1308,12 +1240,12 @@ class ForwardModel:
             
             start_time_H = time.perf_counter()
             final_scale, final_res = self.scale_HybridNewBisec(scale_low,scale_high,res_low,res_high,Cf_sampling,
-                eta_total,combustion_end,bl_h,effective_bl_growth,)
+                eta_total,combustion_end,percent_obstruction,effective_bl_growth,)
             end_time_H = time.perf_counter()
 
             start_time_solve = time.perf_counter()
 
-            results = self.solver(Preburner_TStag=self.ICs.TstagAir,Cf_sampling=Cf_sampling,eta_total=eta_total,combustion_end=combustion_end,bl_h=bl_h,
+            results = self.solver(Preburner_TStag=self.ICs.TstagAir,Cf_sampling=Cf_sampling,eta_total=eta_total,combustion_end=combustion_end,percent_obstruction=percent_obstruction,
                                 bl_growth=effective_bl_growth,scale=final_scale,acceptedScale=True,supersonicSolve=True,)
             end_time_solve = time.perf_counter()
 
@@ -1329,7 +1261,7 @@ class ForwardModel:
         elif self.config.geometry_type == "constant_area":
             start_time_total =  time.perf_counter()
            
-            results = self.solver(Preburner_TStag=self.ICs.TstagAir,Cf_sampling=Cf_sampling,eta_total=eta_total,combustion_end=combustion_end,bl_h=bl_h,
+            results = self.solver(Preburner_TStag=self.ICs.TstagAir,Cf_sampling=Cf_sampling,eta_total=eta_total,combustion_end=combustion_end,percent_obstruction=percent_obstruction,
                                 bl_growth=effective_bl_growth,scale=0,acceptedScale=True,supersonicSolve=True,)
 
             end_time_total =  time.perf_counter()

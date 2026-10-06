@@ -1,0 +1,5 @@
+Case_Name: BL_Height_V5_Test
+Draws: 1500
+Tune: 500
+Chains: 12
+Cores: 12

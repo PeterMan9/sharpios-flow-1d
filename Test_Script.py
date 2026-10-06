@@ -117,29 +117,39 @@ forward_model = ForwardModel(
 True_Cf_dNz = 0.002
 True_eta_Total = 0.8
 True_combustion_end = geometry.tube_length*0.6
-True_precent_obstruction = 0.01
+True_precent_obstruction = 0.05
 True_bl_growth = 1.2
+True_bl_growth_2 = 1.8
 
 results = forward_model.run(True_precent_obstruction,True_Cf_dNz,True_eta_Total,True_combustion_end,True_bl_growth)
+results_2 = forward_model.run(True_precent_obstruction,True_Cf_dNz,True_eta_Total,True_combustion_end,True_bl_growth_2)
 
-plt.plot(results["x"], results["Area"])
+plt.plot(results["x"], results["Area"], label = "BL 1")
+plt.plot(results_2["x"], results_2["Area"], label = "BL 2")
 plt.xlabel("X")
 plt.ylabel("Area (m^2)")
+plt.legend()
 plt.savefig("x vs area for tube")
 plt.close()
 
 
 plt.plot(results["x"], results["pressure"], "--", label="Predicted Pressure")
 plt.plot(results["PT_X"],results["PT_P"], "o", label="PT Pressure")
+plt.plot(results_2["x"], results_2["pressure"], "--", label="Predicted Pressure 2")
+plt.plot(results_2["PT_X"],results_2["PT_P"], "o", label="PT Pressure 2 ")
+
 plt.xlabel("X")
 plt.ylabel("pressure (Pa)")
 plt.legend()
 plt.savefig("x vs PT vs Predicted Pressure ")
 plt.close()
 
-plt.plot(results["x"], results["Mach"])
+plt.plot(results["x"], results["Mach"], label="Mach 1")
+plt.plot(results_2["x"], results_2["Mach"], label="Mach 2")
+
 plt.xlabel("X")
 plt.ylabel("Mach")
+plt.legend()    
 plt.savefig("x vs Mach for tube")
 plt.close()
 

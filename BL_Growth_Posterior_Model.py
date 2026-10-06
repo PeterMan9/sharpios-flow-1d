@@ -128,13 +128,6 @@ forward_model = ForwardModel(
 )
 
 
-True_Cf_dNz = 0.006
-True_eta_Total = 0.8
-True_combustion_end = geometry.tube_length*0.6
-True_precent_obstruction = 0.01
-True_bl_growth = 1.2
-
-
 def bl_growthFunc(A,B,C,Re,M,T):
     return A * Re + B * M + C * T
 #MCMC functions
@@ -149,7 +142,8 @@ def log_likelihood(A,B,C,true_PTPressure,true_param_values,data_vector):
     B = float(B)
     C = float(C)
     #true_param_values consists of these params in this order[cf, eta_total, combustion_end, throat_obstruction, bl_growth]
-    #data_vector is the Re,M,T generated from the true run of the forward model 
+    #data_vector is the Re,M,T generated from the true run of the forward model. 
+    #this data vector is taking the Re,M,T from the end of the tube in the true run 
 
     try:
         #the order of inputs for this func is: throat_obstruction,Cf_dnz,eta_total,combustion_end,bl_growth
@@ -265,18 +259,19 @@ def run_MCMC_case(case, parameters, true_values):
             true_PTPressure,data_vector = generatingTrueValues(set_True_Cf_dnz,set_True_eta_Total,set_True_combustion_end,set_True_throat_obstruction,set_True_bl_growth)
             # Setting up prior distributions for the three coeff A, B, and C.
             # PyMC will propose/sample values of these random variables during MCMC.
-            rv_PriorA = pm.Normal("A", mu=set_A_Prior_mu,  sigma=set_A_Prior_sigma,
-                                              initval=set_A_Prior_mu,default_transform=None)
-            rv_PriorB = pm.Normal("B", mu=set_B_Prior_mu, sigma = set_B_Prior_sigma, 
-                                                 initval=set_B_Prior_mu, default_transform=None)
-            rv_PriorC = pm.Normal("C", mu=set_C_Prior_mu, sigma = set_C_Prior_sigma, 
-                                                      initval=set_C_Prior_mu, default_transform=None)
+            rv_PriorA = pm.TruncatedNormal("A", mu=set_A_Prior_mu,  sigma=set_A_Prior_sigma,
+                                              initval=0.2 * set_A_Prior_sigma,default_transform=None)
+            rv_PriorB = pm.TruncatedNormal("B", mu=set_B_Prior_mu, sigma = set_B_Prior_sigma,
+                                                 initval=0.2 * set_B_Prior_sigma, default_transform=None)
+            rv_PriorC = pm.TruncatedNormal("C", mu=set_C_Prior_mu, sigma = set_C_Prior_sigma,
+                                                      initval=0.2 * set_C_Prior_sigma, default_transform=None)
             
             #getting the log likelihood of my model given the random scalors taken from the priors vs the true data 
             log_like = log_likelihood(rv_PriorA,rv_PriorB,rv_PriorC,
                                       pt.as_tensor_variable(true_PTPressure, dtype="float64"),
                                       pt.as_tensor_variable(true_param_values, dtype="float64"),
                                       pt.as_tensor_variable(data_vector, dtype="float64"),)
+            
             #adds the custom likelihood to PyMC's model log-probability. 
             #So this is what pymc will use to evaluate the posterior distribution of the parameters A, B, and C.
             pm.Potential("likelihood", log_like)
@@ -339,8 +334,17 @@ def run_MCMC_case(case, parameters, true_values):
 
                 print("Overall acceptance rate:", acceptance_rate)
 
-    summary = az.summary(trace)
+    summary = az.summary(trace, round_to = 6)
 
+    #getting the posterior samples for A, B, and C from the trace object.
+    #and then flattening them into 1D arrays for further analysis or plotting. so this means that if it is 4 chains and 1000 draws,
+    #then the flattened array will have 4000 samples for each parameter.
+    A_samples = trace.posterior["A"].values.flatten()
+    B_samples = trace.posterior["B"].values.flatten()
+    C_samples = trace.posterior["C"].values.flatten()
+
+    #calculating the boundary layer growth using the posterior samples
+    bl_growth_samples = bl_growthFunc(A_samples,B_samples,C_samples,data_vector[0],data_vector[1],data_vector[2])
     #writing a txt file with all the base settings for the mcmc run and some arviz summary stats and acceptance rate 
     with open(case_folder/ f"{nameofCase}_MCMC_Report.txt", "w") as f:
         f.write(f"Parameters Included in Model = {param_names}\n")
@@ -373,6 +377,11 @@ def run_MCMC_case(case, parameters, true_values):
         f.write("---------------------\n")
         f.write(summary.to_string())
 
+        f.write(f"\nBL Growth mean = {np.mean(bl_growth_samples):.4f}\n")
+        f.write(f"BL Growth std = {np.std(bl_growth_samples):.4f}\n")
+        f.write(f"BL Growth 2.5% quantile = {np.percentile(bl_growth_samples, 2.5):.4f}\n")
+        f.write(f"BL Growth 97.5% quantile = {np.percentile(bl_growth_samples, 97.5):.4f}\n")
+       
         f.write("\nOther Results and metrics \n")
         f.write(f"Acceptance Rate: {acceptance_rate}\n")
 
@@ -382,15 +391,7 @@ def run_MCMC_case(case, parameters, true_values):
         f.write(f"Chains = {set_chains}\n")
         f.write(f"Cores = {set_cores}\n")
 
-    #getting the posterior samples for A, B, and C from the trace object.
-    #and then flattening them into 1D arrays for further analysis or plotting. so this means that if it is 4 chains and 1000 draws,
-    #then the flattened array will have 4000 samples for each parameter.
-    A_samples = trace.posterior["A"].values.flatten()
-    B_samples = trace.posterior["B"].values.flatten()
-    C_samples = trace.posterior["C"].values.flatten()
-
-    #calculating the boundary layer growth using the posterior samples
-    bl_growth_samples = bl_growthFunc(A_samples,B_samples,C_samples,data_vector[0],data_vector[1],data_vector[2])
+    
 
     true_values = {
             "Cf_dnz": set_True_Cf_dnz,
@@ -450,6 +451,27 @@ def run_MCMC_case(case, parameters, true_values):
         plt.savefig(diagnostics_folder / f"{param}_{nameofCase}_rank.png", dpi=200)
         plt.close()
 
+    running_mean_bl_growth = (np.cumsum(bl_growth_samples)/ np.arange(1, len(bl_growth_samples) + 1))
+    blG_samples = np.arange(1, len(bl_growth_samples) + 1)
+
+    plt.figure(figsize=(6, 4))
+
+    plt.plot(blG_samples,running_mean_bl_growth,linewidth=1.4,label="Running mean")
+
+    plt.axhline(set_True_bl_growth,color="red",linestyle="--",linewidth=1.2,label=f"True = {set_True_bl_growth:g}")
+
+    plt.title(f"BL Growth Running Mean | {nameofCase}", fontsize=11)
+    plt.xlabel("MCMC Sample", fontsize=9)
+    plt.ylabel("BL Growth", fontsize=9)
+
+    plt.tick_params(axis="both", labelsize=8)
+    plt.grid(True, alpha=0.25)
+    plt.legend(fontsize=8, loc="best")
+    plt.tight_layout()
+    plt.savefig(case_folder / "BL Growth Running Mean.png",dpi=220, bbox_inches="tight")
+    plt.close()
+
+    
     pair_vars = ["A","B", "C", "bl_growth"]
 
     pair_samples = {
@@ -458,6 +480,7 @@ def run_MCMC_case(case, parameters, true_values):
         "C": trace.posterior["C"].values.flatten(),
         "bl_growth": bl_growth_samples}
 
+    
     n = len(pair_vars)
     fig, axs = plt.subplots(n, n, figsize=(11, 11))
 
@@ -494,38 +517,35 @@ def run_MCMC_case(case, parameters, true_values):
 #cases and running model 
 if __name__ == "__main__":
     
-
     parameters = {
         "A":{
             "prior_mu": 0.0,
             "prior_sigma": 1e-5,
-            "scale": 1e-7,
-            "scaling": 0.001},
+            "scale": 1e-6,
+            "scaling": 0.1},
         "B":{
-                "prior_mu": 0.0,
-                "prior_sigma": 0.08,
-                "scale": 0.001,
-                "scaling": 0.0001},
-        "C":{
-                "prior_mu": 0.0,
-                "prior_sigma": 0.08,
-                "scale": 0.001,
-                "scaling": 0.0001},
-                }
-    
-    case = {
-        "Case_Name": "BL_Growth_V1_LongTest",
-        "Draws": 1000,
-        "Tune": 100,
-        "Chains": 8,
-        "Cores": 8,
-        }
-    
+            "prior_mu": 0.0,
+            "prior_sigma": 1e-6,
+            "scale": 1e-6,
+            "scaling": 0.1},
+    "C":{
+            "prior_mu": 0.0,
+            "prior_sigma": 0.01,
+            "scale": 0.01,
+            "scaling": 0.1},
+            } 
 
-    set_True_Cf_dnz =  0.006
+    case = {
+        "Case_Name": "BL_Growth_V2_Test",
+        "Draws": 500,
+        "Tune": 500,
+        "Chains": 12,
+        "Cores": 12,}
+    
+    set_True_Cf_dnz =  0.002
     set_True_eta_Total = 0.8
     set_True_combustion_end = geometry.tube_length*0.6
-    set_True_throat_obstruction = 0.01
+    set_True_throat_obstruction = 0.05
     set_True_bl_growth = 1.2
     true_values = np.array([set_True_Cf_dnz,set_True_eta_Total,set_True_combustion_end,set_True_throat_obstruction,set_True_bl_growth],dtype=np.float64)
 

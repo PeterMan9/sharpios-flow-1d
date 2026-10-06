@@ -1,0 +1,44 @@
+Parameters Included in Model = ['A', 'B', 'C']
+BL_Height_V6_Test Values 
+True Values for uncertain parameters used to mimic real gathered data 
+True Cf = 0.006
+True Eta Total = 0.8
+True Combustion End = 0.6
+True Max Obstruction Pecentage = 0.1
+True Boundary Layer Growth = 1.2
+
+Coefficent A Prior Mean = 0.0
+Coefficent A Prior Sigma = 0.01
+Coefficent A Scale = 1e-06
+Coefficent A Scaling = 0.01
+
+Coefficent B Prior Mean = 0.0
+Coefficent B Prior Sigma = 1
+Coefficent B Scale = 0.01
+Coefficent B Scaling = 0.01
+
+Coefficent C Prior Mean = 0.0
+Coefficent C Prior Sigma = 0.5
+Coefficent C Scale = 0.001
+Coefficent C Scaling = 0.0001
+
+ARVIZ Summary
+---------------------
+       mean        sd  eti89_lb  eti89_ub    ess_bulk     ess_tail     r_hat  mcse_mean   mcse_sd
+A -0.000042  0.000344 -0.000652  0.000334  148.005783    39.679739  1.618727   0.000025  0.000047
+B  0.000414  0.964799 -1.543808  1.550261  895.362008  1227.450048  1.025590   0.032297  0.024612
+C  0.023875  0.195931 -0.190591  0.371761  134.936915    40.369911  1.667448   0.014366  0.026608
+Percent Obstruction:
+Percent Obstruction mean = 0.0970
+Percent Obstruction std = 0.0035
+Percent Obstruction 2.5% quantile = 0.0899
+Percent Obstruction 97.5% quantile = 0.1038
+
+Other Results and metrics 
+Acceptance Rate: 0.15411111111111112
+
+Settings:
+Draws = 3000
+Tune = 500
+Chains = 12
+Cores = 12

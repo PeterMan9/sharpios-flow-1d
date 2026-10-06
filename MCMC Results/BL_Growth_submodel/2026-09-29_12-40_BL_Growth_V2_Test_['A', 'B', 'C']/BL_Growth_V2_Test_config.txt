@@ -1,0 +1,5 @@
+Case_Name: BL_Growth_V2_Test
+Draws: 500
+Tune: 500
+Chains: 12
+Cores: 12

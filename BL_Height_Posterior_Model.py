@@ -1,3 +1,5 @@
+from turtle import color
+
 import numpy as np
 import matplotlib.pyplot as plt
 import cantera as ct
@@ -152,30 +154,30 @@ def log_likelihood(A,B,C,true_PTPressure,true_param_values,data_vector):
     #data_vector is the Re,M,T generated from the true run of the forward model 
 
     try:
-        #the order of inputs for this func is: throat_obstruction,Cf_dnz,eta_total,combustion_end,bl_growth
-        #i am building my own bl_height based off of A,B,C, but the others will stay the same 
+        #i am building my own bl_height based off of A,B,C
+        #the data vector is Re,M,T and it is gathered at the end of the tube in my forward model
         bl_height = bl_heightFunc(A,B,C,data_vector[0],data_vector[1],data_vector[2])
+        
         #i am calculating the percent obstruction based off of the bl_height that is generated from my func etc 
         tube_height = forward_model.geometry.tube_height
-        unaffected_height = tube_height - bl_height
-        unaffected_area = unaffected_height **2
-        percent_obstruction = 1 - unaffected_area/ forward_model.geometry.tube_area
-        results = forward_model.run(percent_obstruction,true_param_values[0],true_param_values[1],true_param_values[2],true_param_values[4])
+        effective_height = tube_height - bl_height
+        effective_area = effective_height **2
+        percent_obstruction = 1 - effective_area/ forward_model.geometry.tube_area
 
+        #the order of inputs for this func is: throat_obstruction,Cf_dnz,eta_total,combustion_end,bl_growth
+        results = forward_model.run(percent_obstruction,true_param_values[0],true_param_values[1],true_param_values[2],true_param_values[4])
         Predicted_PTPressure = results["PT_P"]
 
         if Predicted_PTPressure.shape != true_PTPressure.shape:
             raise RuntimeError(
                 f"PT shape mismatch: pred={Predicted_PTPressure.shape}, "
-                f"true={true_PTPressure.shape}, PT_X={results.get('PT_X')}"
-            )
+                f"true={true_PTPressure.shape}, PT_X={results.get('PT_X')}")
         
         predicted_error = Predicted_PTPressure - true_PTPressure
         percent_uncertainty = 0.01 
         sigma_i = np.sqrt((percent_uncertainty * true_PTPressure)**2) 
 
         log_prob = np.sum(stats.norm.logpdf(predicted_error,loc = 0.0,scale = sigma_i))
-
         return np.array(log_prob, dtype=np.float64)
     
     except Exception as e:
@@ -183,7 +185,6 @@ def log_likelihood(A,B,C,true_PTPressure,true_param_values,data_vector):
             traceback.print_exc()
             return np.array(-np.inf, dtype=np.float64)
     
-
 def generatingTrueValues(True_Cf_dnz,True_eta_total,True_combustion_end,True_throat_obstruction,True_bl_growth):
     try:
         results = forward_model.run(True_throat_obstruction,True_Cf_dnz,True_eta_total,True_combustion_end,True_bl_growth)
@@ -192,19 +193,16 @@ def generatingTrueValues(True_Cf_dnz,True_eta_total,True_combustion_end,True_thr
         true_PTPressure = results["PT_P"]
         pt_noise = rng.normal(0, 0.01 * true_PTPressure,true_PTPressure.shape)  
         true_noisy_PTPressure = true_PTPressure + pt_noise
-
         return true_noisy_PTPressure,data_vector
     except Exception as e:
         print(f"Failed to Gen True Values because of {e}")
         raise
 
 #MCMC Model
-
 def run_MCMC_case(case, parameters, true_values):
 
     param_names = ["A", "B", "C"]
-
-
+    
     #setting true values for my 5 uncertain params so that I can mimic and create a true/real pt data set 
     set_True_Cf_dnz = true_values[0]
     set_True_eta_Total = true_values[1]
@@ -250,7 +248,7 @@ def run_MCMC_case(case, parameters, true_values):
             results_root = Path("MCMC Results")
             results_root.mkdir(exist_ok = True)
 
-            submodel_folder = results_root / "BL_Growth_submodel"
+            submodel_folder = results_root / "BL_Height_submodel"
             submodel_folder.mkdir(exist_ok = True)
 
             case_folder = submodel_folder / run_label
@@ -345,9 +343,23 @@ def run_MCMC_case(case, parameters, true_values):
 
                 print("Overall acceptance rate:", acceptance_rate)
 
-    summary = az.summary(trace)
+    summary = az.summary(trace, round_to = 6)
 
+    #getting the posterior samples for A, B, and C from the trace object.
+    #and then flattening them into 1D arrays for further analysis or plotting. so this means that if it is 4 chains and 1000 draws,
+    #then the flattened array will have 4000 samples for each parameter.
+    A_samples = trace.posterior["A"].values.flatten()
+    B_samples = trace.posterior["B"].values.flatten()
+    C_samples = trace.posterior["C"].values.flatten()
+
+    #calculating the boundary layer growth using the posterior samples
+    bl_height_samples = bl_heightFunc(A_samples,B_samples,C_samples,data_vector[0],data_vector[1],data_vector[2])
+    effective_height_samples = forward_model.geometry.tube_height - bl_height_samples
+    effective_area_samples = effective_height_samples **2
+    percent_obstruction_samples = 1 - (effective_area_samples)/forward_model.geometry.tube_area
+    
     #writing a txt file with all the base settings for the mcmc run and some arviz summary stats and acceptance rate 
+
     with open(case_folder/ f"{nameofCase}_MCMC_Report.txt", "w") as f:
         f.write(f"Parameters Included in Model = {param_names}\n")
 
@@ -379,6 +391,12 @@ def run_MCMC_case(case, parameters, true_values):
         f.write("---------------------\n")
         f.write(summary.to_string())
 
+        f.write("\nPercent Obstruction:\n")
+        f.write(f"Percent Obstruction mean = {np.mean(percent_obstruction_samples):.4f}\n")
+        f.write(f"Percent Obstruction std = {np.std(percent_obstruction_samples):.4f}\n")
+        f.write(f"Percent Obstruction 2.5% quantile = {np.percentile(percent_obstruction_samples, 2.5):.4f}\n")
+        f.write(f"Percent Obstruction 97.5% quantile = {np.percentile(percent_obstruction_samples, 97.5):.4f}\n")
+
         f.write("\nOther Results and metrics \n")
         f.write(f"Acceptance Rate: {acceptance_rate}\n")
 
@@ -388,16 +406,7 @@ def run_MCMC_case(case, parameters, true_values):
         f.write(f"Chains = {set_chains}\n")
         f.write(f"Cores = {set_cores}\n")
 
-    #getting the posterior samples for A, B, and C from the trace object.
-    #and then flattening them into 1D arrays for further analysis or plotting. so this means that if it is 4 chains and 1000 draws,
-    #then the flattened array will have 4000 samples for each parameter.
-    A_samples = trace.posterior["A"].values.flatten()
-    B_samples = trace.posterior["B"].values.flatten()
-    C_samples = trace.posterior["C"].values.flatten()
-
-    #calculating the boundary layer growth using the posterior samples
-    bl_height_samples = bl_heightFunc(A_samples,B_samples,C_samples,data_vector[0],data_vector[1],data_vector[2])
-    
+  
 
     #labels for parameters to be used in plots - its just there so that i dont have to manually make new plots 
     param_labels = {
@@ -449,13 +458,38 @@ def run_MCMC_case(case, parameters, true_values):
         plt.savefig(diagnostics_folder / f"{param}_{nameofCase}_rank.png", dpi=200)
         plt.close()
 
-    pair_vars = ["A","B", "C", "bl_height"]
+ 
+
+    running_mean_throat_obstruction = (
+    np.cumsum(percent_obstruction_samples)
+    / np.arange(1, len(percent_obstruction_samples) + 1)
+    )
+
+    po_samples = np.arange(1, len(percent_obstruction_samples) + 1)
+
+    plt.figure(figsize=(6, 4))
+
+    plt.plot(po_samples,running_mean_throat_obstruction,linewidth=1.4,label="Running mean")
+
+    plt.axhline(set_True_throat_obstruction,color="red",linestyle="--",linewidth=1.2,label=f"True = {set_True_throat_obstruction:g}")
+
+    plt.title(f"Percent Obstruction Running Mean | {nameofCase}", fontsize=11)
+    plt.xlabel("MCMC Sample", fontsize=9)
+    plt.ylabel("Percent Obstruction", fontsize=9)
+
+    plt.tick_params(axis="both", labelsize=8)
+    plt.grid(True, alpha=0.25)
+    plt.legend(fontsize=8, loc="best")
+    plt.tight_layout()
+    plt.savefig(case_folder / "Percent Obstruction Running Mean.png",dpi=220, bbox_inches="tight")
+    plt.close()
+    pair_vars = ["A","B", "C", "percent_obstruction"]
 
     pair_samples = {
         "A": trace.posterior["A"].values.flatten(),
         "B": trace.posterior["B"].values.flatten(),
         "C": trace.posterior["C"].values.flatten(),
-        "bl_height": bl_height_samples}
+        "percent_obstruction": percent_obstruction_samples}
 
     n = len(pair_vars)
     fig, axs = plt.subplots(n, n, figsize=(11, 11))
@@ -497,25 +531,25 @@ if __name__ == "__main__":
     parameters = {
         "A":{
             "prior_mu": 0.0,
-            "prior_sigma": 1e-5,
-            "scale": 1e-7,
-            "scaling": 0.001},
+            "prior_sigma": 0.0001,
+            "scale": 1e-6,
+            "scaling": 0.01},
         "B":{
-                "prior_mu": 0.0,
-                "prior_sigma": 0.08,
-                "scale": 0.001,
-                "scaling": 0.0001},
+            "prior_mu": 0.0,
+            "prior_sigma": 0.1,
+            "scale": 0.01,
+            "scaling": 0.01},
         "C":{
-                "prior_mu": 0.0,
-                "prior_sigma": 0.08,
-                "scale": 0.001,
-                "scaling": 0.0001},
-                }
+            "prior_mu": 0.0,
+            "prior_sigma": 0.1,
+            "scale": 0.001,
+            "scaling": 0.0001},
+            }
     
     case = {
-        "Case_Name": "BL_Growth_V1_LongTest",
-        "Draws": 1000,
-        "Tune": 100,
+        "Case_Name": "BL_Height_V9_Test",
+        "Draws": 20000,
+        "Tune": 1500,
         "Chains": 12,
         "Cores": 12,
         }
@@ -524,7 +558,7 @@ if __name__ == "__main__":
     set_True_Cf_dnz =  0.006
     set_True_eta_Total = 0.8
     set_True_combustion_end = geometry.tube_length*0.6
-    set_True_throat_obstruction = 0.01
+    set_True_throat_obstruction = 0.10
     set_True_bl_growth = 1.2
     true_values = np.array([set_True_Cf_dnz,set_True_eta_Total,set_True_combustion_end,set_True_throat_obstruction,set_True_bl_growth],dtype=np.float64)
 

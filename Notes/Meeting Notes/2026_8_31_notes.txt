@@ -1,9 +1,20 @@
 Model related first:
 
-So with regards to the boundary layer growth and % throat obstruction look into 
-    rals opinion on having the % obstruction include the bl_growth or if it can just be added on top later 
+multi Re,M,T etc data points 
 
-Mention that I was thinking about having multiple Re,M,T probes to make the calibration a bit more accurate. the actual implementation would tie into the 
-    previous question 
+so first thought is do i make my throat obstruction just be based off of boundary layer height or height * bl growth 
+
+I need to ask ral about how exactly i should be implementing my boundary layer growth. 
+
+	I have two options the one i am doing right now is giving a % of area obstruction and then 
+		applying the boundary layer growth on top 
+	The other option is to give it a % area of obstruction that already includes the max boundary layer growth on top 		of the boundary layer height and sort of back solve two a BL height and or BL growth 
+
+Since the Frame of reference is for example mach 0.5 to mach 0.53 
+
+
+I need to look at how i want to implement the % obstruction sub model because i would need the Re,M,T to correspond to the end of the tube. so that just loops back into the previous question 
+
+
 
 Besides that ask if my reference letters choices are ok 
