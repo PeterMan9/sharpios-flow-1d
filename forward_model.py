@@ -329,7 +329,7 @@ class ConstantAreaInletConditions:
 @dataclass(frozen=True)
 class WindTunnelInletConditions:
 
-    #there are the initial conditions i am using for the code
+    #there are the initial conditions i am using for the codeBL_Height_Posterior_Model.py
     #the values are taken from dreyers paper (have a copy in zotero)
     #I am specifically using the case pb-3
 
@@ -1225,7 +1225,7 @@ class ForwardModel:
             effective_bl_growth = bl_growth
         else:
             percent_obstruction = 0.0
-            effective_bl_growth = 0.0
+            effective_bl_growth = 1
 
         if self.config.geometry_type == "wind_tunnel":
                 
