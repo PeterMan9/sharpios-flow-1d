@@ -18,7 +18,7 @@ config = ModelConfig(
     combustion=True,
 )
 geometry = ConstantAreaGeometry(
-    tube_area=1 *(45e-3 * 45e-3),
+    tube_area=7 *(45e-3 * 45e-3),
     tube_length=1,
     x_injLocation=1 * 0.15,
 )
@@ -60,9 +60,8 @@ M1 = 0.999
 M2 = 0.999
 M3 = 0.999
 
-mdot_Air = 0.4430
-mdot_H2 = 0.003
-
+mdot_Air = (0.4430 * 10)
+mdot_H2 = (0.003*0.9)
 Y_air = get_Y("O2:0.21, N2:0.79")
 Y_H2 = get_Y("H2:1.0")
 
@@ -101,8 +100,8 @@ inlet = ConstantAreaInletConditions(
 combustion = SmartsModel(
     hpr_h2=120e6, #J/kg
     fst=0.029,
-    phi=0.2306,
-    theta=1.2,
+    phi=(inlet.mdot_H2/inlet.mdot_Air)/0.029,
+    theta=1.0,
     x_react=0.0,
 )
 
@@ -114,9 +113,9 @@ forward_model = ForwardModel(
     mechanism="h2_air.yaml"
 )
 
-True_Cf_dNz = 0.002
+True_Cf_dNz = 0.001
 True_eta_Total = 0.8
-True_combustion_end = geometry.tube_length*0.6
+True_combustion_end = geometry.tube_length*0.4
 True_precent_obstruction = 0.05
 True_bl_growth = 1.2
 

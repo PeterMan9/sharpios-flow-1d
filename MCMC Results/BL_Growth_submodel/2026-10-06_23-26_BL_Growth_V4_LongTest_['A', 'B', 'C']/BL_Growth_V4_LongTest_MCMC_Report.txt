@@ -1,0 +1,43 @@
+Parameters Included in Model = ['A', 'B', 'C']
+BL_Growth_V4_LongTest Values 
+True Values for uncertain parameters used to mimic real gathered data 
+True Diverging Nozzle Cf = 0.002
+True Eta Total = 0.8
+True Combustion End = 0.6
+True Throat Obstruction Pecentage = 0.05
+True Boundary Layer Growth = 1.5
+
+Coefficent A Prior Mean = 0.0
+Coefficent A Prior Sigma = 1e-05
+Coefficent A Scale = 1e-06
+Coefficent A Scaling = 0.1
+
+Coefficent B Prior Mean = 0.0
+Coefficent B Prior Sigma = 1e-06
+Coefficent B Scale = 1e-06
+Coefficent B Scaling = 0.1
+
+Coefficent C Prior Mean = 0.0
+Coefficent C Prior Sigma = 0.01
+Coefficent C Scale = 0.01
+Coefficent C Scaling = 0.1
+
+ARVIZ Summary
+---------------------
+       mean        sd  eti89_lb  eti89_ub      ess_bulk      ess_tail     r_hat  mcse_mean   mcse_sd
+A  0.000002  0.000009 -0.000012  0.000016  25629.046003  32736.503003  1.000378   0.000000  0.000000
+B  0.000000  0.000001 -0.000002  0.000002  25595.780461  32088.398743  1.000413   0.000000  0.000000
+C  0.003789  0.004716 -0.003715  0.011322  25683.442536  32789.231633  1.000355   0.000029  0.000021
+BL Growth mean = 1.7183
+BL Growth std = 0.1732
+BL Growth 2.5% quantile = 1.4273
+BL Growth 97.5% quantile = 2.1036
+
+Other Results and metrics 
+Acceptance Rate: 0.23670555555555556
+
+Settings:
+Draws = 30000
+Tune = 2000
+Chains = 12
+Cores = 12

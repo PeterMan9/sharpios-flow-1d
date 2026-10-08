@@ -224,22 +224,9 @@ class WindTunnelGeometry:
 #function to define pressure tap locations 
 #because of the way my rk45 works right now i basically check if i have crossed the location of a PT and  then use interpolation to get approx values 
 #for the pt location and the pressure values at that location
-def pressureTap(x_old: float, p_old: float, x_new: float, p_new: float, PT_locations: list[float]) -> tuple[float | None , float| None]:
-    location = None
-    p_tap = None
-
-    for location in PT_locations[:]:
-        locationCrossed = (x_old <= location <= x_new)
-
-        if locationCrossed:
-            if x_new != x_old:
-                frac = (location - x_old)/(x_new - x_old)
-                p_tap = p_old + frac  * (p_new - p_old)
-
-                PT_locations.remove(location)
-                return p_tap,x_new 
-    
-    return None,None
+def pressureTap(x_arr: np.array, pressure_arr: np.array, PT_locations: np.array) -> tuple[np.array, np.array]:
+    pt_data = np.interp(PT_locations, x_arr, pressure_arr)
+    return np.array(PT_locations), pt_data
 
 #mach num
 def mNum(v:float,a:float) -> float: #mach number 
@@ -264,7 +251,6 @@ class SmartsModel:
     def x_norm(self,x:float,combustion_end:float) -> float:
         X = (x - self.x_react)/(combustion_end - self.x_react)
         return max(0.0, min(X, 1.0))
-        return X
 
     #mixing eff func 
     def eta(self,x:float, eta_total:float, combustion_end:float) -> float:
@@ -585,7 +571,7 @@ class ForwardModel:
                     lamda *= 0.5
                     continue
                 E_new = self.pressureResidual(Pstag, P_new, T, gamma, percent_obstruction, bl_g)
-                #print("P_new", P_new,"lamda", lamda,"E_new", E_new)
+                print("P_new", P_new,"lamda", lamda,"E_new", E_new)
 
                 if np.isfinite(E_new) and abs(E_new) < abs(E):
                     accepted = True
@@ -839,6 +825,8 @@ class ForwardModel:
                 inlet_Pstag = Preburner_Pstag
                 inlet_rho = rho_preburner
                 inlet_M = M_Preburner_Inlet
+            #maybe do smth similar like this PT_locations = np.linspace(self.geometry.solver_end_location/10, self.geometry.solver_end_location, 10).tolist()
+            #but have it be region based so more pts in the diverging, and converging sections
 
             PT_locations = [0.1,0.3,0.4,0.495,0.5,0.505,0.51,0.55,0.6,0.64]
 
@@ -846,18 +834,16 @@ class ForwardModel:
             inlet_Tstag = Preburner_TStag
             inlet_Pstag = self.pstag_predicted(self.ICs.mdot_i, self.geometry.smallest_eff_area(percent_obstruction,bl_growth), 
                                                inlet_Tstag, self.gas_properties(inlet_Tstag, 101325, self.ICs.Y_mix)["gamma"])
-            #inlet_P = self.newtonRaphson_P(inlet_Pstag,inlet_Pstag, inlet_T, 
-                                #           self.gas_properties(inlet_T, 101325, self.ICs.Y_mix)["gamma"],percent_obstruction, bl_growth)
-            inlet_P = 0.99* inlet_Pstag
+            #inlet_P = self.newtonRaphson_P(inlet_Pstag,inlet_Pstag, inlet_T, self.gas_properties(inlet_T, 101325, self.ICs.Y_mix)["gamma"],percent_obstruction, bl_growth)
+            inlet_P = 0.90* inlet_Pstag
             inlet_gasProperties = self.gas_properties(inlet_T, inlet_P, self.ICs.Y_mix)
             
             inlet_U = self.ICs.mdot_i/(inlet_P * self.geometry.inlet_area(percent_obstruction, bl_growth) / (self.ICs.R_mix * inlet_T))
             inlet_M = inlet_U/soS(inlet_T,self.ICs.R_mix,inlet_gasProperties["gamma"])
             inlet_rho = self.ICs.mdot_i/(self.geometry.inlet_area(percent_obstruction, bl_growth) * inlet_U)
             #think about getting ride of this sonic solve stuff
-            sonicSolveCount = 0
             dataGatherCounter = 0
-            PT_locations = [0.1,0.2,0.3,0.5,0.5,0.6,0.7,0.8,0.9,self.geometry.solver_end_location]
+            
 
             
         temp = [inlet_T]                # creating fresh arrays in function 
@@ -874,6 +860,7 @@ class ForwardModel:
         stepList = [1e-1]
         mdotList = [self.ICs.mdot_i]
         
+        data_vector = [] #just making empty for now
         pt_location = []
         pt_pressures = []
         
@@ -882,10 +869,12 @@ class ForwardModel:
 
         mdotReconstructed = [self.ICs.mdot_i] #recontruction array to check if calcs are correct 
         throatP = 0
+
         pb_count = 0
         throat_count = 0
         conv_count = 0
         div_count = 0
+
         max_solver_steps = 20000
         solver_steps = 0
 
@@ -1026,19 +1015,19 @@ class ForwardModel:
 
             if self.config.geometry_type == "constant_area":
 
-                pt_P, pt_x= pressureTap(xList[-2],pressure[-2],xCurrent, PCurrent,PT_locations)
-
-                if pt_P is not None:
-                    pt_location.append(pt_x)
-                    pt_pressures.append(pt_P)
-
+                '''
                 if len(pt_location) > 8 and dataGatherCounter == 0:
                     dynamic_viscosity = self.gas_properties(temp[-1],pressure[-1],self.ICs.Y_mix)["mu"]
                     d_tube = np.sqrt(self.geometry.tube_area)
                     Re = density[-1] * velocities[-1] * d_tube / dynamic_viscosity
                     data_vector = np.array([Re, machNum[-1],temp[-1],xList[-1]])
                     dataGatherCounter += 1
+                '''
 
+                if machNum[-1] > 1.0:
+                    break
+
+                    
         #converting to np arrays
         V_List = np.array(velocities)
         P_List = np.array(pressure)
@@ -1048,14 +1037,16 @@ class ForwardModel:
         AreaRatio_List = np.array(areaRatio)
         pStag_List = np.array(pStag)
         tStag_List = np.array(tStag)
-        x_used_List = np.array(xList[:len(V_List)])
+        x_List = np.array(xList)
         Area_List = np.array(areaList)
         dAdx_List = np.array(dAdxList)
-        pt_PressureList = np.array(pt_pressures)
-        pt_locationList = np.array(pt_location)
+        PT_locations = np.linspace(x_List[-1]/10, x_List[-1],10)
 
+        pt_locationList, pt_PressureList = pressureTap(x_List, P_List, PT_locations)
+        
         mdotReconsturcted_List = np.array(mdotReconstructed)
         mdot_List = mdotList
+
         entropy_List = np.array(entropy)
         return {
             "velocity": V_List,
@@ -1065,7 +1056,7 @@ class ForwardModel:
             "Mach": M_List,
             "pressure_stag": pStag_List,
             "temperature_stag": tStag_List,
-            "x": x_used_List,
+            "x": x_List,
             "Area": Area_List,
             "dAdx": dAdx_List,
             "mdot": mdot_List,
@@ -1167,8 +1158,7 @@ class ForwardModel:
         res_candidate = best_res
 
         for i in range(maxIters):
-            
-            
+
             width = scale_high - scale_low
 
             # Secant / false-position proposal

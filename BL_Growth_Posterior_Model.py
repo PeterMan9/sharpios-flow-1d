@@ -536,9 +536,9 @@ if __name__ == "__main__":
             } 
 
     case = {
-        "Case_Name": "BL_Growth_V2_Test",
-        "Draws": 500,
-        "Tune": 500,
+        "Case_Name": "BL_Growth_V4_LongTest",
+        "Draws": 30000,
+        "Tune": 2000,
         "Chains": 12,
         "Cores": 12,}
     
@@ -546,7 +546,7 @@ if __name__ == "__main__":
     set_True_eta_Total = 0.8
     set_True_combustion_end = geometry.tube_length*0.6
     set_True_throat_obstruction = 0.05
-    set_True_bl_growth = 1.2
+    set_True_bl_growth = 1.5
     true_values = np.array([set_True_Cf_dnz,set_True_eta_Total,set_True_combustion_end,set_True_throat_obstruction,set_True_bl_growth],dtype=np.float64)
 
     # A prior / sampler settings

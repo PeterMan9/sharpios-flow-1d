@@ -28,8 +28,8 @@ from forward_model import (
 
 config = ModelConfig(
     geometry_type="constant_area",
-    friction=True,
-    boundary_layer=True,
+    friction=False,
+    boundary_layer=False,
     combustion=True,
 )
 geometry = ConstantAreaGeometry(
@@ -75,9 +75,8 @@ M1 = 0.999
 M2 = 0.999
 M3 = 0.999
 
-mdot_Air = 0.4430
-mdot_H2 = 0.003
-
+mdot_Air = (0.4430 * 10)
+mdot_H2 = (0.003*0.9)
 Y_air = get_Y("O2:0.21, N2:0.79")
 Y_H2 = get_Y("H2:1.0")
 
@@ -92,6 +91,7 @@ air_inlet_gamma = air_properties["gamma"]
 h2_inlet_gamma = h2_properties["gamma"]
 R_mix = mix_properties["R_specific"]
 Tstag_air = T_air * (1.0+ (air_inlet_gamma - 1.0) / 2.0 * M1**2)
+Pstag_air = P_air * (1 + (air_inlet_gamma - 1.0) / 2.0)**(air_inlet_gamma / (air_inlet_gamma - 1.0))
 
 inlet = ConstantAreaInletConditions(
     dir_air=0.229 / 39.37,
@@ -116,8 +116,8 @@ inlet = ConstantAreaInletConditions(
 combustion = SmartsModel(
     hpr_h2=120e6, #J/kg
     fst=0.029,
-    phi=0.2306,
-    theta=1.2,
+    phi=(inlet.mdot_H2/inlet.mdot_Air)/0.029,
+    theta=1.0,
     x_react=0.0,
 )
 
@@ -130,23 +130,16 @@ forward_model = ForwardModel(
 )
 
 
-True_Cf_dNz = 0.006
-True_eta_Total = 0.8
-True_combustion_end = geometry.tube_length*0.6
-True_precent_obstruction = 0.01
-True_bl_growth = 1.2
-
-
-def bl_heightFunc(A,B,C,Re,M,T):
-    return A * Re + B * M + C * T
+def combustion_endFunc(A,B,C):
+    return A * Tstag_air + B * Pstag_air + C * combustion.phi
 #MCMC functions
 #using black box approach 
 
 # wrapper for Op var. basically tells log_likelihood func that i am just putting in a double prec scalar and will
 # output a double precision scalar 
 # this is just so that i can easily pas my prior into my function 
-@as_op(itypes=[pt.dscalar,pt.dscalar,pt.dscalar,pt.dvector,pt.dvector,pt.dvector],otypes=[pt.dscalar]) 
-def log_likelihood(A,B,C,true_PTPressure,true_param_values,data_vector):    
+@as_op(itypes=[pt.dscalar,pt.dscalar,pt.dscalar,pt.dvector,pt.dvector],otypes=[pt.dscalar]) 
+def log_likelihood(A,B,C,true_PTPressure,true_param_values):    
     A = float(A)
     B = float(B)
     C = float(C)
@@ -154,18 +147,12 @@ def log_likelihood(A,B,C,true_PTPressure,true_param_values,data_vector):
     #data_vector is the Re,M,T generated from the true run of the forward model 
 
     try:
-        #i am building my own bl_height based off of A,B,C
-        #the data vector is Re,M,T and it is gathered at the end of the tube in my forward model
-        bl_height = bl_heightFunc(A,B,C,data_vector[0],data_vector[1],data_vector[2])
+        #i am building my own combustion based off of coeff A,B,C and then three physcial processes.
+        #tstag, pstag, phi
+        combustion_end = combustion_endFunc(A,B,C)
         
-        #i am calculating the percent obstruction based off of the bl_height that is generated from my func etc 
-        tube_height = forward_model.geometry.tube_height
-        effective_height = tube_height - bl_height
-        effective_area = effective_height **2
-        percent_obstruction = 1 - effective_area/ forward_model.geometry.tube_area
-
         #the order of inputs for this func is: throat_obstruction,Cf_dnz,eta_total,combustion_end,bl_growth
-        results = forward_model.run(percent_obstruction,true_param_values[0],true_param_values[1],true_param_values[2],true_param_values[4])
+        results = forward_model.run(true_param_values[3],true_param_values[0],true_param_values[1],combustion_end,true_param_values[4])
         Predicted_PTPressure = results["PT_P"]
 
         if Predicted_PTPressure.shape != true_PTPressure.shape:
@@ -188,12 +175,11 @@ def log_likelihood(A,B,C,true_PTPressure,true_param_values,data_vector):
 def generatingTrueValues(True_Cf_dnz,True_eta_total,True_combustion_end,True_throat_obstruction,True_bl_growth):
     try:
         results = forward_model.run(True_throat_obstruction,True_Cf_dnz,True_eta_total,True_combustion_end,True_bl_growth)
-        data_vector = results["data_vector"]
         rng = np.random.default_rng(42)
         true_PTPressure = results["PT_P"]
         pt_noise = rng.normal(0, 0.01 * true_PTPressure,true_PTPressure.shape)  
         true_noisy_PTPressure = true_PTPressure + pt_noise
-        return true_noisy_PTPressure,data_vector
+        return true_noisy_PTPressure
     except Exception as e:
         print(f"Failed to Gen True Values because of {e}")
         raise
@@ -248,7 +234,7 @@ def run_MCMC_case(case, parameters, true_values):
             results_root = Path("MCMC Results")
             results_root.mkdir(exist_ok = True)
 
-            submodel_folder = results_root / "BL_Height_submodel"
+            submodel_folder = results_root / "Combustion_End_Submodel"
             submodel_folder.mkdir(exist_ok = True)
 
             case_folder = submodel_folder / run_label
@@ -264,23 +250,22 @@ def run_MCMC_case(case, parameters, true_values):
                 for key,value in case.items():
                     f.write(f"{key}: {value}\n")
 
-            #generating my TRUE pressure data. also getting my data vector for my emperical bl growth function
-            true_PTPressure,data_vector = generatingTrueValues(set_True_Cf_dnz,set_True_eta_Total,set_True_combustion_end,set_True_throat_obstruction,set_True_bl_growth)
+            #generating my TRUE pressure data
+            true_PTPressure = generatingTrueValues(set_True_Cf_dnz,set_True_eta_Total,set_True_combustion_end,set_True_throat_obstruction,set_True_bl_growth)
 
             # Setting up prior distributions for the three coeff A, B, and C.
             # PyMC will propose/sample values of these random variables during MCMC.
-            rv_PriorA = pm.Normal("A", mu=set_A_Prior_mu,  sigma=set_A_Prior_sigma,
-                                              initval=set_A_Prior_mu,default_transform=None)
-            rv_PriorB = pm.Normal("B", mu=set_B_Prior_mu, sigma = set_B_Prior_sigma, 
-                                                 initval=set_B_Prior_mu, default_transform=None)
-            rv_PriorC = pm.Normal("C", mu=set_C_Prior_mu, sigma = set_C_Prior_sigma, 
-                                                      initval=set_C_Prior_mu, default_transform=None)
-            
+            rv_PriorA = pm.TruncatedNormal("A", mu=set_A_Prior_mu,  sigma=set_A_Prior_sigma,
+                                                initval=0.2 * set_A_Prior_sigma,default_transform=None)
+            rv_PriorB = pm.TruncatedNormal("B", mu=set_B_Prior_mu, sigma = set_B_Prior_sigma,
+                                                    initval=0.2 * set_B_Prior_sigma, default_transform=None)
+            rv_PriorC = pm.TruncatedNormal("C", mu=set_C_Prior_mu, sigma = set_C_Prior_sigma,
+                                                        initval=0.2 * set_C_Prior_sigma, default_transform=None)
+
             #getting the log likelihood of my model given the random scalors taken from the priors vs the true data 
             log_like = log_likelihood(rv_PriorA,rv_PriorB,rv_PriorC,
                                       pt.as_tensor_variable(true_PTPressure, dtype="float64"),
-                                      pt.as_tensor_variable(true_param_values, dtype="float64"),
-                                      pt.as_tensor_variable(data_vector, dtype="float64"),)
+                                      pt.as_tensor_variable(true_param_values, dtype="float64"))
             #adds the custom likelihood to PyMC's model log-probability. 
             #So this is what pymc will use to evaluate the posterior distribution of the parameters A, B, and C.
             pm.Potential("likelihood", log_like)
@@ -352,11 +337,8 @@ def run_MCMC_case(case, parameters, true_values):
     B_samples = trace.posterior["B"].values.flatten()
     C_samples = trace.posterior["C"].values.flatten()
 
-    #calculating the boundary layer growth using the posterior samples
-    bl_height_samples = bl_heightFunc(A_samples,B_samples,C_samples,data_vector[0],data_vector[1],data_vector[2])
-    effective_height_samples = forward_model.geometry.tube_height - bl_height_samples
-    effective_area_samples = effective_height_samples **2
-    percent_obstruction_samples = 1 - (effective_area_samples)/forward_model.geometry.tube_area
+ 
+    combustion_end_samples = combustion_endFunc(A_samples,B_samples,C_samples)
     
     #writing a txt file with all the base settings for the mcmc run and some arviz summary stats and acceptance rate 
 
@@ -391,11 +373,11 @@ def run_MCMC_case(case, parameters, true_values):
         f.write("---------------------\n")
         f.write(summary.to_string())
 
-        f.write("\nPercent Obstruction:\n")
-        f.write(f"Percent Obstruction mean = {np.mean(percent_obstruction_samples):.4f}\n")
-        f.write(f"Percent Obstruction std = {np.std(percent_obstruction_samples):.4f}\n")
-        f.write(f"Percent Obstruction 2.5% quantile = {np.percentile(percent_obstruction_samples, 2.5):.4f}\n")
-        f.write(f"Percent Obstruction 97.5% quantile = {np.percentile(percent_obstruction_samples, 97.5):.4f}\n")
+        f.write("\nCombustion End Location:\n")
+        f.write(f"Combustion End Location mean = {np.mean(combustion_end_samples):.4f}\n")
+        f.write(f"Combustion End Location std = {np.std(combustion_end_samples):.4f}\n")
+        f.write(f"Combustion End Location 2.5% quantile = {np.percentile(combustion_end_samples, 2.5):.4f}\n")
+        f.write(f"Combustion End Location 97.5% quantile = {np.percentile(combustion_end_samples, 97.5):.4f}\n")
 
         f.write("\nOther Results and metrics \n")
         f.write(f"Acceptance Rate: {acceptance_rate}\n")
@@ -460,36 +442,36 @@ def run_MCMC_case(case, parameters, true_values):
 
  
 
-    running_mean_throat_obstruction = (
-    np.cumsum(percent_obstruction_samples)
-    / np.arange(1, len(percent_obstruction_samples) + 1)
+    running_mean_combustion_end_location = (
+    np.cumsum(combustion_end_samples)
+    / np.arange(1, len(combustion_end_samples) + 1)
     )
 
-    po_samples = np.arange(1, len(percent_obstruction_samples) + 1)
+    po_samples = np.arange(1, len(combustion_end_samples) + 1)
 
     plt.figure(figsize=(6, 4))
 
-    plt.plot(po_samples,running_mean_throat_obstruction,linewidth=1.4,label="Running mean")
+    plt.plot(po_samples,running_mean_combustion_end_location,linewidth=1.4,label="Running mean")
 
-    plt.axhline(set_True_throat_obstruction,color="red",linestyle="--",linewidth=1.2,label=f"True = {set_True_throat_obstruction:g}")
+    plt.axhline(set_True_combustion_end,color="red",linestyle="--",linewidth=1.2,label=f"True = {set_True_combustion_end:g}")
 
-    plt.title(f"Percent Obstruction Running Mean | {nameofCase}", fontsize=11)
+    plt.title(f"Combustion End Location Running Mean | {nameofCase}", fontsize=11)
     plt.xlabel("MCMC Sample", fontsize=9)
-    plt.ylabel("Percent Obstruction", fontsize=9)
+    plt.ylabel("Combustion End Location", fontsize=9)
 
     plt.tick_params(axis="both", labelsize=8)
     plt.grid(True, alpha=0.25)
     plt.legend(fontsize=8, loc="best")
     plt.tight_layout()
-    plt.savefig(case_folder / "Percent Obstruction Running Mean.png",dpi=220, bbox_inches="tight")
+    plt.savefig(case_folder / "Combustion End Location Running Mean.png",dpi=220, bbox_inches="tight")
     plt.close()
-    pair_vars = ["A","B", "C", "percent_obstruction"]
+    pair_vars = ["A","B", "C", "combustion_end_location"]
 
     pair_samples = {
         "A": trace.posterior["A"].values.flatten(),
         "B": trace.posterior["B"].values.flatten(),
         "C": trace.posterior["C"].values.flatten(),
-        "percent_obstruction": percent_obstruction_samples}
+        "combustion_end_location": combustion_end_samples}
 
     n = len(pair_vars)
     fig, axs = plt.subplots(n, n, figsize=(11, 11))
@@ -531,35 +513,36 @@ if __name__ == "__main__":
     parameters = {
         "A":{
             "prior_mu": 0.0,
-            "prior_sigma": 0.0001,
-            "scale": 1e-6,
+            "prior_sigma": 1e-2,
+            "scale": 0.1,
             "scaling": 0.01},
         "B":{
             "prior_mu": 0.0,
-            "prior_sigma": 0.1,
+            "prior_sigma": 1e-2,
             "scale": 0.01,
             "scaling": 0.01},
         "C":{
             "prior_mu": 0.0,
-            "prior_sigma": 0.1,
-            "scale": 0.001,
-            "scaling": 0.0001},
+            "prior_sigma": 1e-1,
+            "scale": 0.1,
+            "scaling": 0.01},
             }
     
     case = {
-        "Case_Name": "BL_Height_V9_Test",
-        "Draws": 20000,
-        "Tune": 1500,
+        "Case_Name": "Combustion_End_V5_Test",
+        "Draws": 4000,
+        "Tune": 2000,
         "Chains": 12,
         "Cores": 12,
         }
     
 
-    set_True_Cf_dnz =  0.006
+    set_True_Cf_dnz =  0.002
     set_True_eta_Total = 0.8
-    set_True_combustion_end = geometry.tube_length*0.6
+    set_True_combustion_end = geometry.tube_length*0.4
     set_True_throat_obstruction = 0.10
     set_True_bl_growth = 1.2
+
     true_values = np.array([set_True_Cf_dnz,set_True_eta_Total,set_True_combustion_end,set_True_throat_obstruction,set_True_bl_growth],dtype=np.float64)
 
     # A prior / sampler settings

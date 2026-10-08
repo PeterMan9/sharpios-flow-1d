@@ -1,0 +1,44 @@
+Parameters Included in Model = ['A', 'B', 'C']
+Combustion_End_V5_Test Values 
+True Values for uncertain parameters used to mimic real gathered data 
+True Cf = 0.002
+True Eta Total = 0.8
+True Combustion End = 0.4
+True Max Obstruction Pecentage = 0.1
+True Boundary Layer Growth = 1.2
+
+Coefficent A Prior Mean = 0.0
+Coefficent A Prior Sigma = 0.01
+Coefficent A Scale = 0.1
+Coefficent A Scaling = 0.01
+
+Coefficent B Prior Mean = 0.0
+Coefficent B Prior Sigma = 0.01
+Coefficent B Scale = 0.01
+Coefficent B Scaling = 0.01
+
+Coefficent C Prior Mean = 0.0
+Coefficent C Prior Sigma = 0.1
+Coefficent C Scale = 0.1
+Coefficent C Scaling = 0.01
+
+ARVIZ Summary
+---------------------
+       mean        sd  eti89_lb  eti89_ub   ess_bulk   ess_tail     r_hat  mcse_mean   mcse_sd
+A -0.002847  0.011436 -0.025139  0.014243  34.767952  16.209712  1.247428   0.002113  0.001407
+B  0.000000  0.000000 -0.000000  0.000001  34.655793  16.214320  1.248819   0.000000  0.000000
+C -0.002829  0.125261 -0.258286  0.227359  25.650753  16.191974  1.391323   0.026824  0.019553
+Combustion End Location:
+Combustion End Location mean = 0.4023
+Combustion End Location std = 0.3429
+Combustion End Location 2.5% quantile = 0.2585
+Combustion End Location 97.5% quantile = 0.4166
+
+Other Results and metrics 
+Acceptance Rate: 0.314625
+
+Settings:
+Draws = 4000
+Tune = 2000
+Chains = 12
+Cores = 12

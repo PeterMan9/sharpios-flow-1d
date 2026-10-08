@@ -1,0 +1,5 @@
+Case_Name: Combustion_End_V5_Test
+Draws: 4000
+Tune: 2000
+Chains: 12
+Cores: 12

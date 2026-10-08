@@ -1,0 +1,5 @@
+Case_Name: BL_Growth_V4_LongTest
+Draws: 30000
+Tune: 2000
+Chains: 12
+Cores: 12
