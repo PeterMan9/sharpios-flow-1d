@@ -1,0 +1,5 @@
+Case_Name: Skin_Friction_V1_Test
+Draws: 6000
+Tune: 2000
+Chains: 12
+Cores: 12

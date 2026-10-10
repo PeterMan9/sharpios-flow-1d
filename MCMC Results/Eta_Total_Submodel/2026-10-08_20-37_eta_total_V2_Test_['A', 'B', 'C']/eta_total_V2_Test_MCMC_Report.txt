@@ -1,0 +1,50 @@
+Parameters Included in Model = ['A', 'B', 'C']
+eta_total_V2_Test Values 
+True Values for uncertain parameters used to mimic real gathered data 
+True Cf = 0.002
+True Eta Total = 0.8
+True Combustion End = 0.4
+True Max Obstruction Pecentage = 0.1
+True Boundary Layer Growth = 1.2
+
+Coefficent A Prior Mean = 0.0
+Coefficent A Prior Sigma = 0.01
+Coefficent A Scale = 0.1
+Coefficent A Scaling = 0.01
+
+Coefficent B Prior Mean = 0.0
+Coefficent B Prior Sigma = 0.01
+Coefficent B Scale = 0.01
+Coefficent B Scaling = 0.01
+
+Coefficent C Prior Mean = 0.0
+Coefficent C Prior Sigma = 0.1
+Coefficent C Scale = 0.1
+Coefficent C Scaling = 0.01
+
+Coefficent D Prior Mean = 0.0
+Coefficent D Prior Sigma = 0.01
+Coefficent D Scale = 0.01
+Coefficent D Scaling = 0.01
+
+ARVIZ Summary
+---------------------
+       mean        sd  eti89_lb  eti89_ub     ess_bulk     ess_tail     r_hat  mcse_mean   mcse_sd
+A  0.180139  0.000959  0.178594  0.181679  3431.869999  4519.550273  1.003719   0.000016  0.000011
+B  0.000045  0.009962 -0.016045  0.016055  2475.880090  3148.853747  1.003123   0.000200  0.000138
+C  0.001947  0.101177 -0.162162  0.163709  2304.092778  3283.063528  1.006087   0.002110  0.001533
+D  0.000141  0.010133 -0.016017  0.016342  2221.881514  2873.270306  1.007661   0.000215  0.000154
+Eta Total:
+Eta Total mean = 0.7980
+Eta Total std = 0.0042
+Eta Total 2.5% quantile = 0.7896
+Eta Total 97.5% quantile = 0.8062
+
+Other Results and metrics 
+Acceptance Rate: 0.28355555555555556
+
+Settings:
+Draws = 3000
+Tune = 1000
+Chains = 12
+Cores = 12

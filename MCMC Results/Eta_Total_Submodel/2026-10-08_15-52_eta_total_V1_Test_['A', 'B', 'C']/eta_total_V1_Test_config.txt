@@ -1,0 +1,5 @@
+Case_Name: eta_total_V1_Test
+Draws: 500
+Tune: 500
+Chains: 12
+Cores: 12

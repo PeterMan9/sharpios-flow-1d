@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import cantera as ct
 
 #Forward Model Set/Configs 
-from forward_model import (
+from MainModels.forward_model import (
     ForwardModel,
     ModelConfig,
     ConstantAreaGeometry,
@@ -13,9 +13,9 @@ from forward_model import (
 
 config = ModelConfig(
     geometry_type="constant_area",
-    friction=False,
+    friction=True,
     boundary_layer=False,
-    combustion=True,
+    combustion=False,
 )
 geometry = ConstantAreaGeometry(
     tube_area=7 *(45e-3 * 45e-3),
@@ -113,14 +113,16 @@ forward_model = ForwardModel(
     mechanism="h2_air.yaml"
 )
 
-True_Cf_dNz = 0.001
-True_eta_Total = 0.8
+True_Cf = 0.002
+True_Cf_2 = 2.6
+True_eta_Total = 0.6
 True_combustion_end = geometry.tube_length*0.4
 True_precent_obstruction = 0.05
 True_bl_growth = 1.2
 
-results = forward_model.run(True_precent_obstruction,True_Cf_dNz,True_eta_Total,True_combustion_end,True_bl_growth)
-
+results = forward_model.run(True_precent_obstruction,True_Cf,True_eta_Total,True_combustion_end,True_bl_growth)
+print(results["data_vector"])
+results_2 = forward_model.run(True_precent_obstruction,True_Cf_2,True_eta_Total,True_combustion_end,True_bl_growth)
 plt.plot(results["x"], results["Area"], label = "BL 1")
 plt.xlabel("X")
 plt.ylabel("Area (m^2)")
@@ -131,8 +133,8 @@ plt.close()
 
 plt.plot(results["x"], results["pressure"], "--", label="Predicted Pressure")
 plt.plot(results["PT_X"],results["PT_P"], "o", label="PT Pressure")
-
-
+plt.plot(results_2["x"], results_2["pressure"], "--", label="Predicted Pressure 2")
+plt.plot(results_2["PT_X"],results_2["PT_P"], "o", label="PT Pressure 2")
 plt.xlabel("X")
 plt.ylabel("pressure (Pa)")
 plt.legend()
