@@ -9,13 +9,13 @@ import pymc as pm
 import pytensor.tensor as pt
 from pytensor.compile.ops import as_op
 import arviz as az
+import netCDF4
 
 import sys
 import os
 from datetime import datetime
 from pathlib import Path
 import traceback
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 #Forward Model Set/Configs 
@@ -138,21 +138,18 @@ def eta_totalFunc(A,B,C, D):
 #MCMC functions
 #using black box approach 
 
-# wrapper for Op var. basically tells log_likelihood func that i am just putting in a double prec scalar and will
+# wrapper for Op var. basically tells log_likelihood func that i am just putting in a double pres scalar and will
 # output a double precision scalar 
-# this is just so that i can easily pas my prior into my function 
+#true_param_values consists of these params in this order[cf, eta_total, combustion_end, throat_obstruction, bl_growth]
 @as_op(itypes=[pt.dscalar,pt.dscalar,pt.dscalar,pt.dscalar,pt.dvector,pt.dvector],otypes=[pt.dscalar]) 
 def log_likelihood(A,B,C,D,true_PTPressure,true_param_values):    
     A = float(A)
     B = float(B)
     C = float(C)
     D = float(D)
-    #true_param_values consists of these params in this order[cf, eta_total, combustion_end, throat_obstruction, bl_growth]
-    #data_vector is the Re,M,T generated from the true run of the forward model 
 
     try:
-        #i am building my own combustion based off of coeff A,B,C and then three physcial processes.
-        #tstag, pstag, phi
+        #total mixing eff based off of coeff A,B,C and tstag, pstag, phi
         eta_total = eta_totalFunc(A,B,C,D)
         
         #the order of inputs for this func is: throat_obstruction,Cf_dnz,eta_total,combustion_end,bl_growth
@@ -167,7 +164,7 @@ def log_likelihood(A,B,C,D,true_PTPressure,true_param_values):
         predicted_error = Predicted_PTPressure - true_PTPressure
         percent_uncertainty = 0.01 
         sigma_i = np.sqrt((percent_uncertainty * true_PTPressure)**2) 
-
+        
         log_prob = np.sum(stats.norm.logpdf(predicted_error,loc = 0.0,scale = sigma_i))
         return np.array(log_prob, dtype=np.float64)
     
@@ -176,6 +173,8 @@ def log_likelihood(A,B,C,D,true_PTPressure,true_param_values):
             traceback.print_exc()
             return np.array(-np.inf, dtype=np.float64)
     
+#generating athetic true pressure dataset based on the forward model and adding noise
+#each pt will have 1% noise added to it relative to the magnitude of the data its measuring     
 def generatingTrueValues(True_Cf_dnz,True_eta_total,True_combustion_end,True_throat_obstruction,True_bl_growth):
     try:
         results = forward_model.run(True_throat_obstruction,True_Cf_dnz,True_eta_total,True_combustion_end,True_bl_growth)
@@ -308,7 +307,7 @@ def run_MCMC_case(case, parameters, true_values):
             plt.hist(prior_D_samples, bins=50, density=True)
             plt.xlabel("Coefficient D")
             plt.ylabel("Density")
-            plt.savefig(priors_folder / f"Prior_Coefficient_C_{nameofCase}.png", dpi=200)
+            plt.savefig(priors_folder / f"Prior_Coefficient_D_{nameofCase}.png", dpi=200)
             plt.close()
 
           #this is the sampler that will be used to sample from the posterior distribution of the parameters A, B, and C.
@@ -348,16 +347,20 @@ def run_MCMC_case(case, parameters, true_values):
 
     summary = az.summary(trace, round_to = 6)
 
+    trace.to_netcdf(str(case_folder / f"{nameofCase}_trace.nc"))
+
     #getting the posterior samples for A, B, and C from the trace object.
     #and then flattening them into 1D arrays for further analysis or plotting. so this means that if it is 4 chains and 1000 draws,
     #then the flattened array will have 4000 samples for each parameter.
-    A_samples = trace.posterior["A"].values.flatten()
-    B_samples = trace.posterior["B"].values.flatten()
-    C_samples = trace.posterior["C"].values.flatten()
-    D_samples = trace.posterior["D"].values.flatten()
+    A_samples = trace.posterior["A"]
+    B_samples = trace.posterior["B"]
+    C_samples = trace.posterior["C"]
+    D_samples = trace.posterior["D"]
 
     eta_total_samples = eta_totalFunc(A_samples,B_samples,C_samples, D_samples)
-
+    trace.posterior["Eta_Total"] = eta_total_samples
+    trace.to_netcdf(str(case_folder / f"{nameofCase}_trace.nc"))
+    eta_total_samples = eta_total_samples.values.flatten()
     #writing a txt file with all the base settings for the mcmc run and some arviz summary stats and acceptance rate
 
     with open(case_folder/ f"{nameofCase}_MCMC_Report.txt", "w") as f:
@@ -557,9 +560,9 @@ if __name__ == "__main__":
     }
     
     case = {
-        "Case_Name": "eta_total_V2_Test",
-        "Draws": 3000,
-        "Tune": 1000,
+        "Case_Name": "eta_total__Sequential_Test",
+        "Draws": 4000,
+        "Tune": 2000,
         "Chains": 12,
         "Cores": 12,
         }

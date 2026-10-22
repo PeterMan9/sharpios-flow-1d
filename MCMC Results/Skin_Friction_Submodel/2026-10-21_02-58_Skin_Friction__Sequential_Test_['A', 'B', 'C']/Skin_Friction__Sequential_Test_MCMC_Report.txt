@@ -1,0 +1,44 @@
+Parameters Included in Model = ['A', 'B', 'C']
+Skin_Friction__Sequential_Test Values 
+True Values for uncertain parameters used to mimic real gathered data 
+True Cf = 0.002
+True Eta Total = 0.8
+True Combustion End = 0.4
+True Max Obstruction Pecentage = 0.1
+True Boundary Layer Growth = 1.2
+
+Coefficent A Prior Mean = 0.0
+Coefficent A Prior Sigma = 5e-07
+Coefficent A Scale = 0.01
+Coefficent A Scaling = 0.01
+
+Coefficent B Prior Mean = 0.0
+Coefficent B Prior Sigma = 0.01
+Coefficent B Scale = 0.1
+Coefficent B Scaling = 0.01
+
+Coefficent C Prior Mean = 0.0
+Coefficent C Prior Sigma = 0.0001
+Coefficent C Scale = 0.01
+Coefficent C Scaling = 0.01
+
+ARVIZ Summary
+---------------------
+       mean        sd  eti89_lb  eti89_ub     ess_bulk    ess_tail     r_hat  mcse_mean   mcse_sd
+A  0.000000  0.000000 -0.000000  0.000000  2721.209180  966.938233  1.011633   0.000000  0.000000
+B  0.000672  0.008689 -0.014066  0.014705  1499.313555  923.500111  1.066709   0.000224  0.000172
+C -0.000001  0.000099 -0.000160  0.000160  2810.291169  800.437386  1.012648   0.000002  0.000001
+Skin Friction Coefficient:
+Skin Friction Coefficient mean = 0.0023
+Skin Friction Coefficient std = 0.0002
+Skin Friction Coefficient 2.5% quantile = 0.0018
+Skin Friction Coefficient 97.5% quantile = 0.0027
+
+Other Results and metrics 
+Acceptance Rate: 0.27377083333333335
+
+Settings:
+Draws = 4000
+Tune = 2000
+Chains = 12
+Cores = 12

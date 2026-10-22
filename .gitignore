@@ -3,7 +3,6 @@ __pycache__/
 Rals's_Code/
 *.pyo
 *.pyd
-MCMC Results/Misc Cases/
-MCMC Results/Semi Good Test Cases/
+MCMC Results/Run_Logs/
 Misc/Whatever_pics/
 old_SSH_Config/

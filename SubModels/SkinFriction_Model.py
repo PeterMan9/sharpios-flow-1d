@@ -15,6 +15,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 import traceback
+import netCDF4
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -136,21 +137,20 @@ def cf_Func(A,B,C,Re,M,T):
 #MCMC functions
 #using black box approach 
 
-# wrapper for Op var. basically tells log_likelihood func that i am just putting in a double prec scalar and will
+# wrapper for Op var. basically tells log_likelihood func that i am just putting in a double pres scalar and will
 # output a double precision scalar 
-# this is just so that i can easily pas my prior into my function 
+#true_param_values consists of these params in this order[cf, eta_total, combustion_end, throat_obstruction, bl_growth]
+
 @as_op(itypes=[pt.dscalar,pt.dscalar,pt.dscalar,pt.dvector,pt.dvector,pt.dvector],otypes=[pt.dscalar]) 
 def log_likelihood(A,B,C,true_PTPressure,true_param_values,data_vector):    
     A = float(A)
     B = float(B)
     C = float(C)
-    #true_param_values consists of these params in this order[cf, eta_total, combustion_end, throat_obstruction, bl_growth]
-    #data_vector is the Re,M,T generated from the true run of the forward model 
 
     try:
-       
+        #Cf emp equation func. passing in my coeffcs, A,B,C and the data vector containing Re, M, T
         cf = cf_Func(A,B,C,data_vector[0],data_vector[1],data_vector[2])
-        
+    
         #the order of inputs for this func is: throat_obstruction,Cf_dnz,eta_total,combustion_end,bl_growth
         results = forward_model.run(true_param_values[3],cf,true_param_values[1],true_param_values[2],true_param_values[4])
         Predicted_PTPressure = results["PT_P"]
@@ -171,15 +171,20 @@ def log_likelihood(A,B,C,true_PTPressure,true_param_values,data_vector):
             print(f"Failed because of: {e}")
             traceback.print_exc()
             return np.array(-np.inf, dtype=np.float64)
-    
+
+#generating athetic true pressure dataset based on the forward model and adding noise
+#each pt will have 1% noise added to it relative to the magnitude of the data its measuring 
 def generatingTrueValues(True_Cf_dnz,True_eta_total,True_combustion_end,True_throat_obstruction,True_bl_growth):
     try:
+        
         results = forward_model.run(True_throat_obstruction,True_Cf_dnz,True_eta_total,True_combustion_end,True_bl_growth)
+        #data vector containing Re, M, T generated from the true run of the forward model
         data_vector = results["data_vector"]
         rng = np.random.default_rng(42)
         true_PTPressure = results["PT_P"]
         pt_noise = rng.normal(0, 0.01 * true_PTPressure,true_PTPressure.shape)  
         true_noisy_PTPressure = true_PTPressure + pt_noise
+
         return true_noisy_PTPressure,data_vector
     except Exception as e:
         print(f"Failed to Gen True Values because of {e}")
@@ -332,17 +337,20 @@ def run_MCMC_case(case, parameters, true_values):
                 print("Overall acceptance rate:", acceptance_rate)
 
     summary = az.summary(trace, round_to = 6)
-
+    trace.to_netcdf(str(case_folder / f"{nameofCase}_trace.nc"))
+    
     #getting the posterior samples for A, B, and C from the trace object.
     #and then flattening them into 1D arrays for further analysis or plotting. so this means that if it is 4 chains and 1000 draws,
     #then the flattened array will have 4000 samples for each parameter.
-    A_samples = trace.posterior["A"].values.flatten()
-    B_samples = trace.posterior["B"].values.flatten()
-    C_samples = trace.posterior["C"].values.flatten()
+    A_samples = trace.posterior["A"]
+    B_samples = trace.posterior["B"]
+    C_samples = trace.posterior["C"]
 
  
     cf_samples = cf_Func(A_samples,B_samples,C_samples,data_vector[0],data_vector[1],data_vector[2])
-    
+    trace.posterior["Skin_Friction"] = cf_samples
+    trace.to_netcdf(str(case_folder / f"{nameofCase}_trace.nc"))
+    cf_samples = cf_samples.values.flatten()
     #writing a txt file with all the base settings for the mcmc run and some arviz summary stats and acceptance rate 
 
     with open(case_folder/ f"{nameofCase}_MCMC_Report.txt", "w") as f:
@@ -443,8 +451,6 @@ def run_MCMC_case(case, parameters, true_values):
         plt.savefig(diagnostics_folder / f"{param}_{nameofCase}_rank.png", dpi=200)
         plt.close()
 
- 
-
     running_mean_cf = (np.cumsum(cf_samples)/ np.arange(1, len(cf_samples) + 1))
 
     cf_samples_count = np.arange(1, len(cf_samples) + 1)
@@ -508,7 +514,6 @@ def run_MCMC_case(case, parameters, true_values):
 
 #cases and running model 
 if __name__ == "__main__":
-    
 
     parameters = {
         "A":{
@@ -529,8 +534,8 @@ if __name__ == "__main__":
             }
     
     case = {
-        "Case_Name": "Skin_Friction_V1_Test",
-        "Draws": 6000,
+        "Case_Name": "Skin_Friction__Sequential_Test",
+        "Draws": 4000,
         "Tune": 2000,
         "Chains": 12,
         "Cores": 12,

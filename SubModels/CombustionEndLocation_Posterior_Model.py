@@ -15,6 +15,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 import traceback
+import netCDF4
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -173,6 +174,8 @@ def log_likelihood(A,B,C,true_PTPressure,true_param_values):
             traceback.print_exc()
             return np.array(-np.inf, dtype=np.float64)
     
+#generating athetic true pressure dataset based on the forward model and adding noise
+#each pt will have 1% noise added to it relative to the magnitude of the data its measuring 
 def generatingTrueValues(True_Cf_dnz,True_eta_total,True_combustion_end,True_throat_obstruction,True_bl_growth):
     try:
         results = forward_model.run(True_throat_obstruction,True_Cf_dnz,True_eta_total,True_combustion_end,True_bl_growth)
@@ -329,17 +332,19 @@ def run_MCMC_case(case, parameters, true_values):
 
                 print("Overall acceptance rate:", acceptance_rate)
 
-    summary = az.summary(trace, round_to = 6)
+    summary = az.summary(trace, round_to = 8)
+    trace.to_netcdf(str(case_folder / f"{nameofCase}_trace.nc"))
 
     #getting the posterior samples for A, B, and C from the trace object.
-    #and then flattening them into 1D arrays for further analysis or plotting. so this means that if it is 4 chains and 1000 draws,
-    #then the flattened array will have 4000 samples for each parameter.
-    A_samples = trace.posterior["A"].values.flatten()
-    B_samples = trace.posterior["B"].values.flatten()
-    C_samples = trace.posterior["C"].values.flatten()
+    A_samples = trace.posterior["A"]
+    B_samples = trace.posterior["B"]
+    C_samples = trace.posterior["C"]
 
- 
     combustion_end_samples = combustion_endFunc(A_samples,B_samples,C_samples)
+
+    trace.posterior["Combustion_End"] = combustion_end_samples
+    trace.to_netcdf(str(case_folder / f"{nameofCase}_trace.nc"))
+    combustion_end_samples = combustion_end_samples.values.flatten()
     
     #writing a txt file with all the base settings for the mcmc run and some arviz summary stats and acceptance rate 
 
@@ -511,23 +516,23 @@ if __name__ == "__main__":
     parameters = {
         "A":{
             "prior_mu": 0.0,
-            "prior_sigma": 1e-2,
+            "prior_sigma": 1e-3,
             "scale": 0.1,
             "scaling": 0.01},
         "B":{
             "prior_mu": 0.0,
-            "prior_sigma": 1e-2,
+            "prior_sigma": 1e-6,
             "scale": 0.01,
             "scaling": 0.01},
         "C":{
             "prior_mu": 0.0,
-            "prior_sigma": 1e-1,
+            "prior_sigma": 1e-3,
             "scale": 0.1,
             "scaling": 0.01},
             }
     
     case = {
-        "Case_Name": "Combustion_End_V5_Test",
+        "Case_Name": "Combustion_End__Sequential_Test_SUB1",
         "Draws": 4000,
         "Tune": 2000,
         "Chains": 12,

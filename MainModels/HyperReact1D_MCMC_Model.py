@@ -14,7 +14,7 @@ from pathlib import Path
 import traceback
 
 #Forward Model Set/Configs 
-from MainModels.forward_model import (
+from forward_model import (
     ForwardModel,
     ModelConfig,
     WindTunnelGeometry,
@@ -179,75 +179,7 @@ def generatingTrueValues(True_Cf_dnz,True_eta_total,True_combustion_end,True_thr
         print(f"Failed to Gen True Values because of {e}")
         raise
 
-#sensitivity testing for params 
-def likelihoodPlotting(Cf_dnz, eta_total, combustion_end,throat_obstruction,bl_growth):
-
-    logplist = []
-    count = 0 
-    
-    MovingVar = combustion_end
-
-    movingVar_grid = np.linspace(MovingVar - MovingVar * 0.1, MovingVar + MovingVar * 0.1, 100)
-
-    True_Cf_dnz = Cf_dnz
-    True_eta_Total = eta_total
-    True_combustion_end = combustion_end
-    True_throat_obst = throat_obstruction
-    True_bl_growth = bl_growth
-    true_PTPressure = generatingTrueValues(True_Cf_dnz, True_eta_Total,True_combustion_end,True_throat_obst,True_bl_growth)
-
-    count = 0
-
-    for movingvar in movingVar_grid:
-        count += 1
-        combustion_end = movingvar
-        try:
-            results = forward_model.run(throat_obstruction,Cf_dnz,eta_total,combustion_end,bl_growth)
-
-
-            Predicted_PTPressure = results["PT_P"]
-
-            if Predicted_PTPressure.shape != true_PTPressure.shape:
-                raise RuntimeError(f"PT shape mismatch at {movingvar}: "f"pred={Predicted_PTPressure.shape}, true={true_PTPressure.shape}")
-
-            predicted_error = Predicted_PTPressure - true_PTPressure
-            percent_uncertainty = 0.01
-            sigma_i = percent_uncertainty * np.abs(true_PTPressure)
-
-            log_prob = np.sum(stats.norm.logpdf(predicted_error,loc=0.0,scale=sigma_i))
-
-            print(count, movingvar, log_prob)
-            logplist.append(log_prob)
-
-        except Exception as e:
-            print(f"Failed at {movingvar} because of: {e}")
-            traceback.print_exc()
-            logplist.append(-np.inf)
-        
-
-
-    logp_array = np.array(logplist)
-    movingVar_list = movingVar_grid[:len(logp_array)]
-    
-    plt.figure()
-    plt.plot(movingVar_list,logp_array)
-    plt.xlabel("Combustion End Values")
-    plt.ylabel("Log Likelihood")
-    plt.grid()
-    plt.savefig("combustion_end.png")  # Saves to the remote workspace
-    plt.close()
-'''
-if __name__ == "__main__":
-    Cf_dnz = 0.006
-    eta_total= 0.8
-    combustion_end = preburner_length
-    throat_obstruction = 0.30
-    bl_growth = 10
-    results = likelihoodPlotting(Cf_dnz, eta_total, combustion_end,throat_obstruction,bl_growth)
-'''
-
 #MCMC Model
-
 def run_MCMC_case(caseConfig):
 
     param_names = caseConfig["Parameters"]
@@ -288,20 +220,23 @@ def run_MCMC_case(caseConfig):
     set_cores = caseConfig["Cores"]
 
     with pm.Model() as model:
-      
-            timestamp = datetime.now().strftime("%Y-%m_%d-%H-%M")
+    
+            #getting timestap for unique run label and creating folders to save results 
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
 
             run_label = (
                 f"{timestamp}_"
-                f"{caseConfig['Case_Name']}_"
-                f"{param_names}"
-            )
-            nameofCase = caseConfig["Case_Name"]
+                f"{case['Case_Name']}")
+            
+            nameofCase = case["Case_Name"]
 
             results_root = Path("MCMC Results")
             results_root.mkdir(exist_ok = True)
 
-            case_folder = results_root / run_label
+            submodel_folder = results_root / "HyperReact_Mainmodel"
+            submodel_folder.mkdir(exist_ok = True)
+
+            case_folder = submodel_folder / run_label
             case_folder.mkdir(exist_ok = True)
             
             priors_folder = case_folder / "Priors"
@@ -311,31 +246,33 @@ def run_MCMC_case(caseConfig):
             diagnostics_folder.mkdir(exist_ok = True)
 
             with open(case_folder/f"{nameofCase}_config.txt", "w") as f:
-                for key,value in caseConfig.items():
+                for key,value in case.items():
                     f.write(f"{key}: {value}\n")
 
 
             true_PTPressure = generatingTrueValues(set_True_Cf_dnz,set_True_eta_Total,set_True_combustion_end,set_True_throat_obstruction,set_True_bl_growth)
 
-            prior_Cf_dnz = pm.TruncatedNormal("Cf_dnz", mu=set_Cf_dnz_Prior_mu,  sigma=set_Cf_dnz_Prior_sigma,
+            #change this to set the have the mu and sigma and etc be taken from the uploaded data
+            #################################################
+            rv_Cf_dnz = pm.TruncatedNormal("Cf_dnz", mu=set_Cf_dnz_Prior_mu,  sigma=set_Cf_dnz_Prior_sigma,
                                               lower = 0,upper = 0.009,initval=set_Cf_dnz_Prior_mu,default_transform=None)
-            prior_eta_Total = pm.TruncatedNormal("eta_Total", mu=set_eta_Total_Prior_mu, sigma = set_eta_Total_Prior_sigma, 
+            rv_eta_Total = pm.TruncatedNormal("eta_Total", mu=set_eta_Total_Prior_mu, sigma = set_eta_Total_Prior_sigma, 
                                                  lower = 0, upper = 1,initval=set_eta_Total_Prior_mu, default_transform=None)
-            prior_combustion_end = pm.TruncatedNormal("combustion_end", mu=set_combustion_end_Prior_mu, sigma = set_combustion_end_Prior_sigma, 
+            rv_combustion_end = pm.TruncatedNormal("combustion_end", mu=set_combustion_end_Prior_mu, sigma = set_combustion_end_Prior_sigma, 
                                                       lower = combustion.x_react,upper = 0.625,initval=set_combustion_end_Prior_mu, default_transform=None)
-            prior_throat_obstruction = pm.TruncatedNormal("throat_obstruction", mu=set_throat_obstruction_Prior_mu, sigma = set_throat_obstruction_Prior_sigma, 
+            rv_throat_obstruction = pm.TruncatedNormal("throat_obstruction", mu=set_throat_obstruction_Prior_mu, sigma = set_throat_obstruction_Prior_sigma, 
                                                           lower = 0.05, upper = 0.25,initval=set_throat_obstruction_Prior_mu, default_transform=None)
-            prior_bl_growth = pm.TruncatedNormal("bl_growth", mu=set_bl_growth_Prior_mu, sigma = set_bl_growth_Prior_sigma,
+            rv_bl_growth = pm.TruncatedNormal("bl_growth", mu=set_bl_growth_Prior_mu, sigma = set_bl_growth_Prior_sigma,
                                                   lower = 5, upper = 15, initval=set_bl_growth_Prior_mu, default_transform=None)
 
-            log_like = log_likelihood(prior_Cf_dnz,prior_eta_Total,prior_combustion_end,prior_throat_obstruction,prior_bl_growth,
+            log_like = log_likelihood(rv_Cf_dnz,rv_eta_Total,rv_combustion_end,rv_throat_obstruction,rv_bl_growth,
                                       pt.as_tensor_variable(true_PTPressure, dtype="float64"))
 
-            prior_Cfdnz_samples = pm.draw(prior_Cf_dnz, 10000, random_seed=42)
-            prior_eta_Total_samples = pm.draw(prior_eta_Total, 10000, random_seed=42)
-            prior_combustion_end_samples = pm.draw(prior_combustion_end, 10000, random_seed=42)
-            prior_throat_obstruction_samples = pm.draw(prior_throat_obstruction, 10000, random_seed=42)
-            prior_bl_growth_samples = pm.draw(prior_bl_growth, 10000, random_seed=42)
+            prior_Cfdnz_samples = pm.draw(rv_Cf_dnz, 10000, random_seed=42)
+            prior_eta_Total_samples = pm.draw(rv_eta_Total, 10000, random_seed=42)
+            prior_combustion_end_samples = pm.draw(rv_combustion_end, 10000, random_seed=42)
+            prior_throat_obstruction_samples = pm.draw(rv_throat_obstruction, 10000, random_seed=42)
+            prior_bl_growth_samples = pm.draw(rv_bl_growth, 10000, random_seed=42)
 
             plt.hist(prior_Cfdnz_samples, bins=50, density=True)
             plt.xlabel("Cf Diverging Nozzle")
@@ -370,7 +307,7 @@ def run_MCMC_case(caseConfig):
             pm.Potential("Error Likelihood",log_like)
 
             step = pm.DEMetropolisZ(
-                vars = [prior_Cf_dnz,prior_eta_Total,prior_combustion_end,prior_throat_obstruction,prior_bl_growth],
+                vars = [rv_Cf_dnz,rv_eta_Total,rv_combustion_end,rv_throat_obstruction,rv_bl_growth],
                 S= np.array([set_Cf_dnz_scale,set_eta_Total_scale,set_combustion_end_scale,set_throat_obstruction_scale,set_bl_growth_scale]), 
                 scaling = np.array([set_Cf_dnz_scaling,set_eta_Total_scaling,set_combustion_end_scaling,set_throat_obstruction_scaling,set_bl_growth_scaling]),  #Initial scale factor for how aggressive the sampler noise moves around 
                 tune="scaling",
@@ -474,8 +411,6 @@ def run_MCMC_case(caseConfig):
             "throat_obstruction" : set_True_throat_obstruction,
             "bl_growth" : set_True_bl_growth
         }
-
-    
 
     for param in summary.index:
         label = param_labels.get(param, param)
@@ -593,56 +528,97 @@ def run_MCMC_case(caseConfig):
     plt.savefig(case_folder / f"PairPlot_{nameofCase}.png",dpi=220,bbox_inches="tight",)
     plt.close(fig)
 
+#will load most recent NetCDF trace from a submodel folder
+def load_latest_trace(submodel_dir: Path):
+   
+
+    # Make sure the folder exists
+    if not submodel_dir.exists():
+        raise FileNotFoundError(f"Submodel directory does not exist: {submodel_dir}")
+
+    # Get only subfolders inside the submodel directory
+    run_folders = [folder for folder in submodel_dir.iterdir() if folder.is_dir()]
+
+    # Make sure at least one run folder exists
+    if not run_folders:
+        raise FileNotFoundError(f"No run folders found in: {submodel_dir}")
+
+    # Pick the most recently modified folder
+    latest_folder = max(run_folders, key=lambda folder: folder.stat().st_mtime)
+
+    # Find all .nc files in that folder
+    nc_files = list(latest_folder.glob("*.nc"))
+
+    # Make sure at least one .nc file exists
+    if not nc_files:
+        raise FileNotFoundError(f"No .nc file found in latest folder: {latest_folder}")
+
+    # If there is only one, this will be it
+    # If somehow there are multiple, choose the most recently modified one
+    latest_nc_file = max(nc_files, key=lambda file: file.stat().st_mtime)
+
+    # Load the trace
+    trace = az.from_netcdf(latest_nc_file)
+
+    return trace, latest_nc_file
+
 #cases and running model 
 if __name__ == "__main__":
-    
-    case_name = sys.argv[1]
+
+    root_dir = Path(__file__).resolve().parent.parent
+    results_dir = root_dir / "MCMC Results"
+
+    trace_BLgrowth, path_BLgrowth = load_latest_trace(results_dir / "BL_Growth_Submodel")
+    trace_BLheight, path_BLheight = load_latest_trace(results_dir / "BL_Height_Submodel")
+    trace_CE, path_CE = load_latest_trace(results_dir / "Combustion_End_Submodel")
+    trace_EtaTotal, path_EtaTotal = load_latest_trace(results_dir / "Eta_Total_Submodel")
+    trace_Cf, path_Cf = load_latest_trace(results_dir / "Skin_Friction_Submodel")
 
     parameters = {
         "Cf_dnz": {
             "true": 0.006,
             "prior_mu": 0.006 * 0.95,
             "prior_sigma": 0.006 * 0.05,
-            "scale": 0.001,
+            "scale": 0.0001,
             "scaling": 0.05,
         },
         "eta_Total": {
             "true": 0.8,
             "prior_mu": 0.8 * 0.95,
             "prior_sigma": 0.8 * 0.05,
-            "scale": 0.1,
+            "scale": 0.01,
             "scaling": 0.5,
             },
         "combustion_end"  :{
             "true": 0.42,
             "prior_mu": 0.55,
             "prior_sigma": 0.55 * 0.175,
-            "scale": 0.1,
+            "scale": 0.01,
             "scaling": 0.1,
         },
         "throat_obstruction" : {
             "true": 0.10,
             "prior_mu": 0.10 * 0.95,
             "prior_sigma": 0.10 * 0.05,
-            "scale": 0.01,
+            "scale": 0.001,
             "scaling": 0.01,
         },
         "bl_growth":{
-            "true": 10,
-            "prior_mu": 10 * 0.95,
-            "prior_sigma": 10 * 0.05,
-            "scale": 1,
+            "true": 1.2,
+            "prior_mu": 1.2 * 0.95,
+            "prior_sigma": 1.2 * 0.05,
+            "scale": 0.1,
             "scaling": 0.01,
         }
     }
     
     all_cases = {    
-        "5p_nData_Long": {
-            "Case_Name": "5p_nData_Long",
+        "HR_NonInformedPriors_2": {
+            "Case_Name": "HR_NonInformedPriors_2",
             "Parameters": ["Cf_dnz", "eta_Total","combustion_end","throat_obstruction","bl_growth"],
 
-            "Draws" : 20000,
-            "Tune" : 1000,
+            "Draws" : 200,
+            "Tune" : 100,
             "Chains" : 12 ,
             "Cores" : 12
             }, 

@@ -1,0 +1,5 @@
+Case_Name: Combustion_End__Sequential_Test_SUB1
+Draws: 4000
+Tune: 2000
+Chains: 12
+Cores: 12
